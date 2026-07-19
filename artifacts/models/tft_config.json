@@ -1,0 +1,45 @@
+{
+  "quantiles": [
+    0.1,
+    0.5,
+    0.9
+  ],
+  "max_encoder_length": 120,
+  "max_prediction_length": 5,
+  "time_varying_unknown_reals": [
+    "close",
+    "open",
+    "high",
+    "low",
+    "volume",
+    "rsi_14",
+    "macd",
+    "ema_20",
+    "ema_50",
+    "atr_14",
+    "volume_ratio",
+    "bb_percent"
+  ],
+  "target": "close",
+  "group_ids": [
+    "symbol"
+  ],
+  "features": [
+    "close",
+    "open",
+    "high",
+    "low",
+    "volume",
+    "rsi_14",
+    "macd",
+    "ema_20",
+    "ema_50",
+    "atr_14",
+    "volume_ratio",
+    "bb_percent"
+  ],
+  "hidden_size": 32,
+  "attention_head_size": 2,
+  "hidden_continuous_size": 16,
+  "dropout": 0.1
+}

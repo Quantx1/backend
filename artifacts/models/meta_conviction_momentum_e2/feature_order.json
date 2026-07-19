@@ -1,0 +1,22 @@
+[
+  "score_pct",
+  "score_z",
+  "score_dispersion",
+  "score_gap",
+  "regime_bull",
+  "regime_bear",
+  "regime_confidence",
+  "days_since_switch",
+  "mkt_rv21",
+  "mkt_ret_21",
+  "mkt_dist_high_63",
+  "realized_vol_63",
+  "beta_index_63",
+  "amihud_illiq_21",
+  "dist_high_252",
+  "tsfm_fwd_ret",
+  "tsfm_uncert",
+  "kronos_fwd_ret",
+  "ens_fwd_ret",
+  "tsfm_kronos_spread"
+]

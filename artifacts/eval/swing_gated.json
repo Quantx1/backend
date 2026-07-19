@@ -1,0 +1,97 @@
+{
+  "engine": "swing_lambdarank",
+  "horizon": 10,
+  "conditional": {
+    "bear": {
+      "n_dates": 296,
+      "mean_gross_h": 0.01004,
+      "mean_bench_h": 0.00444,
+      "mean_excess_h": 0.00561,
+      "hit_rate_vs_bench": 0.52
+    },
+    "bull": {
+      "n_dates": 203,
+      "mean_gross_h": 0.02,
+      "mean_bench_h": 0.01927,
+      "mean_excess_h": 0.00073,
+      "hit_rate_vs_bench": 0.537
+    },
+    "sideways": {
+      "n_dates": 257,
+      "mean_gross_h": 0.00712,
+      "mean_bench_h": 0.00341,
+      "mean_excess_h": 0.00371,
+      "hit_rate_vs_bench": 0.533
+    }
+  },
+  "n_missing_regime": 7,
+  "ungated": {
+    "net_iid": {
+      "sharpe": 0.6418,
+      "n_periods": 84,
+      "period_mean": 0.00612,
+      "cagr": 0.134,
+      "max_drawdown": -0.3726
+    },
+    "excess_iid": {
+      "sharpe": -0.4224,
+      "n_periods": 84,
+      "period_mean": -0.00196,
+      "cagr": -0.0545,
+      "max_drawdown": -0.2739
+    }
+  },
+  "gated": {
+    "gate_bear": {
+      "net_iid": {
+        "sharpe": 0.6952,
+        "n_periods": 84,
+        "period_mean": 0.00531,
+        "cagr": 0.1224,
+        "max_drawdown": -0.3452
+      },
+      "excess_iid": {
+        "sharpe": -0.5318,
+        "n_periods": 84,
+        "period_mean": -0.00276,
+        "cagr": -0.0753,
+        "max_drawdown": -0.3615
+      },
+      "avg_exposure": 0.595
+    },
+    "gate_bear_half": {
+      "net_iid": {
+        "sharpe": 0.7047,
+        "n_periods": 84,
+        "period_mean": 0.00367,
+        "cagr": 0.0875,
+        "max_drawdown": -0.301
+      },
+      "excess_iid": {
+        "sharpe": -0.9373,
+        "n_periods": 84,
+        "period_mean": -0.0044,
+        "cagr": -0.1115,
+        "max_drawdown": -0.4172
+      },
+      "avg_exposure": 0.429
+    },
+    "bull_only": {
+      "net_iid": {
+        "sharpe": 0.4941,
+        "n_periods": 84,
+        "period_mean": 0.00203,
+        "cagr": 0.0469,
+        "max_drawdown": -0.262
+      },
+      "excess_iid": {
+        "sharpe": -0.9787,
+        "n_periods": 84,
+        "period_mean": -0.00604,
+        "cagr": -0.1521,
+        "max_drawdown": -0.4928
+      },
+      "avg_exposure": 0.262
+    }
+  }
+}

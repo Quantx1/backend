@@ -1,0 +1,97 @@
+{
+  "engine": "momentum_lambdarank",
+  "horizon": 20,
+  "conditional": {
+    "bear": {
+      "n_dates": 304,
+      "mean_gross_h": 0.01845,
+      "mean_bench_h": 0.00992,
+      "mean_excess_h": 0.00853,
+      "hit_rate_vs_bench": 0.589
+    },
+    "bull": {
+      "n_dates": 203,
+      "mean_gross_h": 0.04033,
+      "mean_bench_h": 0.03586,
+      "mean_excess_h": 0.00447,
+      "hit_rate_vs_bench": 0.601
+    },
+    "sideways": {
+      "n_dates": 249,
+      "mean_gross_h": 0.0177,
+      "mean_bench_h": 0.01003,
+      "mean_excess_h": 0.00767,
+      "hit_rate_vs_bench": 0.586
+    }
+  },
+  "n_missing_regime": 0,
+  "ungated": {
+    "net_iid": {
+      "sharpe": 0.8953,
+      "n_periods": 48,
+      "period_mean": 0.01844,
+      "cagr": 0.2183,
+      "max_drawdown": -0.4011
+    },
+    "excess_iid": {
+      "sharpe": 0.132,
+      "n_periods": 48,
+      "period_mean": 0.00136,
+      "cagr": 0.009,
+      "max_drawdown": -0.2505
+    }
+  },
+  "gated": {
+    "gate_bear": {
+      "net_iid": {
+        "sharpe": 0.6283,
+        "n_periods": 48,
+        "period_mean": 0.01103,
+        "cagr": 0.1208,
+        "max_drawdown": -0.3897
+      },
+      "excess_iid": {
+        "sharpe": -0.5247,
+        "n_periods": 48,
+        "period_mean": -0.00606,
+        "cagr": -0.0833,
+        "max_drawdown": -0.4544
+      },
+      "avg_exposure": 0.562
+    },
+    "gate_bear_half": {
+      "net_iid": {
+        "sharpe": 0.9653,
+        "n_periods": 48,
+        "period_mean": 0.01078,
+        "cagr": 0.1338,
+        "max_drawdown": -0.2332
+      },
+      "excess_iid": {
+        "sharpe": -0.6917,
+        "n_periods": 48,
+        "period_mean": -0.00631,
+        "cagr": -0.0827,
+        "max_drawdown": -0.4231
+      },
+      "avg_exposure": 0.396
+    },
+    "bull_only": {
+      "net_iid": {
+        "sharpe": 1.3179,
+        "n_periods": 48,
+        "period_mean": 0.01053,
+        "cagr": 0.1356,
+        "max_drawdown": -0.0774
+      },
+      "excess_iid": {
+        "sharpe": -0.5257,
+        "n_periods": 48,
+        "period_mean": -0.00656,
+        "cagr": -0.0907,
+        "max_drawdown": -0.4231
+      },
+      "avg_exposure": 0.229
+    }
+  }
+}

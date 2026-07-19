@@ -1,0 +1,29 @@
+{
+  "model": "momentum_lambdarank",
+  "rank_ic_mean": 0.0843,
+  "rank_ic_std": 0.0417,
+  "rank_icir": 2.0199,
+  "decile_spread_mean": 0.0369,
+  "rank_ic_per_fold": [
+    0.0355,
+    0.0773,
+    0.0878,
+    0.1599,
+    0.0609
+  ],
+  "decile_spread_per_fold": [
+    0.0232,
+    0.037,
+    0.0451,
+    0.0574,
+    0.0218
+  ],
+  "n_folds": 5,
+  "n_rows": 340002,
+  "n_symbols": 310,
+  "n_dates": 1144,
+  "horizon": 20,
+  "n_features": 18,
+  "train_seconds": 68.6,
+  "stack": "price-only (TimesFM/Kronos/RS-features pending GPU)"
+}

@@ -1,0 +1,20 @@
+[
+  "ret_5d",
+  "ret_10d",
+  "ret_21d",
+  "ret_63d",
+  "ret_126d",
+  "ret_252d",
+  "mom_consistency_63",
+  "mom_accel",
+  "vol_adj_mom_63",
+  "dist_sma_50",
+  "dist_sma_200",
+  "above_high_63",
+  "realized_vol_21",
+  "drawdown_252",
+  "rel_volume_21",
+  "obv_slope_21",
+  "xs_rank_ret_21",
+  "xs_rank_ret_63"
+]

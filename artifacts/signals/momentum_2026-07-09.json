@@ -1,0 +1,370 @@
+{
+  "engine": "momentum",
+  "date": "2026-07-09",
+  "generated_at": "2026-07-09T14:55:07.213884",
+  "status": "ok",
+  "forecast_degraded": false,
+  "count": 20,
+  "signals": [
+    {
+      "symbol": "IBREALEST",
+      "style": "momentum",
+      "rank": 1,
+      "percentile": 1.0,
+      "confidence": 100.0,
+      "direction": "BUY",
+      "entry_price": 63.02000045776367,
+      "stop_loss": 58.98,
+      "target": 71.09,
+      "risk_reward": 2.0,
+      "reasons": [
+        "Momentum rank 1/310",
+        "percentile 100%"
+      ],
+      "expected_return": 0.0369,
+      "top_decile_prob": 1.0
+    },
+    {
+      "symbol": "KPITTECH",
+      "style": "momentum",
+      "rank": 2,
+      "percentile": 0.9968,
+      "confidence": 99.7,
+      "direction": "BUY",
+      "entry_price": 558.6500244140625,
+      "stop_loss": 514.31,
+      "target": 647.33,
+      "risk_reward": 2.0,
+      "reasons": [
+        "Momentum rank 2/310",
+        "percentile 100%"
+      ],
+      "expected_return": 0.0367,
+      "top_decile_prob": 1.0
+    },
+    {
+      "symbol": "HONAUT",
+      "style": "momentum",
+      "rank": 3,
+      "percentile": 0.9935,
+      "confidence": 99.4,
+      "direction": "BUY",
+      "entry_price": 39515.0,
+      "stop_loss": 38240.54,
+      "target": 42063.93,
+      "risk_reward": 2.0,
+      "reasons": [
+        "Momentum rank 3/310",
+        "percentile 99%"
+      ],
+      "expected_return": 0.0364,
+      "top_decile_prob": 1.0
+    },
+    {
+      "symbol": "RAYMOND",
+      "style": "momentum",
+      "rank": 4,
+      "percentile": 0.9903,
+      "confidence": 99.0,
+      "direction": "BUY",
+      "entry_price": 607.9000244140625,
+      "stop_loss": 582.65,
+      "target": 658.4,
+      "risk_reward": 2.0,
+      "reasons": [
+        "Momentum rank 4/310",
+        "percentile 99%"
+      ],
+      "expected_return": 0.0362,
+      "top_decile_prob": 1.0
+    },
+    {
+      "symbol": "RADICO",
+      "style": "momentum",
+      "rank": 5,
+      "percentile": 0.9871,
+      "confidence": 98.7,
+      "direction": "BUY",
+      "entry_price": 3892.300048828125,
+      "stop_loss": 3765.14,
+      "target": 4146.61,
+      "risk_reward": 2.0,
+      "reasons": [
+        "Momentum rank 5/310",
+        "percentile 99%"
+      ],
+      "expected_return": 0.0359,
+      "top_decile_prob": 1.0
+    },
+    {
+      "symbol": "FIVESTAR",
+      "style": "momentum",
+      "rank": 6,
+      "percentile": 0.9838,
+      "confidence": 98.4,
+      "direction": "BUY",
+      "entry_price": 550.4000244140625,
+      "stop_loss": 519.62,
+      "target": 611.95,
+      "risk_reward": 2.0,
+      "reasons": [
+        "Momentum rank 6/310",
+        "percentile 98%"
+      ],
+      "expected_return": 0.0357,
+      "top_decile_prob": 1.0
+    },
+    {
+      "symbol": "EXIDEIND",
+      "style": "momentum",
+      "rank": 7,
+      "percentile": 0.9806,
+      "confidence": 98.1,
+      "direction": "BUY",
+      "entry_price": 416.6000061035156,
+      "stop_loss": 399.53,
+      "target": 450.73,
+      "risk_reward": 2.0,
+      "reasons": [
+        "Momentum rank 7/310",
+        "percentile 98%"
+      ],
+      "expected_return": 0.0355,
+      "top_decile_prob": 1.0
+    },
+    {
+      "symbol": "IDEA",
+      "style": "momentum",
+      "rank": 8,
+      "percentile": 0.9773,
+      "confidence": 97.7,
+      "direction": "BUY",
+      "entry_price": 14.25,
+      "stop_loss": 13.64,
+      "target": 15.47,
+      "risk_reward": 2.0,
+      "reasons": [
+        "Momentum rank 8/310",
+        "percentile 98%"
+      ],
+      "expected_return": 0.0352,
+      "top_decile_prob": 1.0
+    },
+    {
+      "symbol": "KAYNES",
+      "style": "momentum",
+      "rank": 9,
+      "percentile": 0.9741,
+      "confidence": 97.4,
+      "direction": "BUY",
+      "entry_price": 3333.800048828125,
+      "stop_loss": 3161.74,
+      "target": 3677.92,
+      "risk_reward": 2.0,
+      "reasons": [
+        "Momentum rank 9/310",
+        "percentile 97%"
+      ],
+      "expected_return": 0.035,
+      "top_decile_prob": 1.0
+    },
+    {
+      "symbol": "CAPLIPOINT",
+      "style": "momentum",
+      "rank": 10,
+      "percentile": 0.9709,
+      "confidence": 97.1,
+      "direction": "BUY",
+      "entry_price": 2538.10009765625,
+      "stop_loss": 2398.84,
+      "target": 2816.63,
+      "risk_reward": 2.0,
+      "reasons": [
+        "Momentum rank 10/310",
+        "percentile 97%"
+      ],
+      "expected_return": 0.0348,
+      "top_decile_prob": 1.0
+    },
+    {
+      "symbol": "INDIGOPNTS",
+      "style": "momentum",
+      "rank": 11,
+      "percentile": 0.9676,
+      "confidence": 96.8,
+      "direction": "BUY",
+      "entry_price": 1065.9000244140625,
+      "stop_loss": 1016.29,
+      "target": 1165.13,
+      "risk_reward": 2.0,
+      "reasons": [
+        "Momentum rank 11/310",
+        "percentile 97%"
+      ],
+      "expected_return": 0.0345,
+      "top_decile_prob": 1.0
+    },
+    {
+      "symbol": "GOCOLORS",
+      "style": "momentum",
+      "rank": 12,
+      "percentile": 0.9644,
+      "confidence": 96.4,
+      "direction": "BUY",
+      "entry_price": 359.6499938964844,
+      "stop_loss": 326.03,
+      "target": 426.88,
+      "risk_reward": 2.0,
+      "reasons": [
+        "Momentum rank 12/310",
+        "percentile 96%"
+      ],
+      "expected_return": 0.0343,
+      "top_decile_prob": 1.0
+    },
+    {
+      "symbol": "ANGELONE",
+      "style": "momentum",
+      "rank": 13,
+      "percentile": 0.9612,
+      "confidence": 96.1,
+      "direction": "BUY",
+      "entry_price": 352.25,
+      "stop_loss": 337.8,
+      "target": 381.15,
+      "risk_reward": 2.0,
+      "reasons": [
+        "Momentum rank 13/310",
+        "percentile 96%"
+      ],
+      "expected_return": 0.034,
+      "top_decile_prob": 1.0
+    },
+    {
+      "symbol": "TRENT",
+      "style": "momentum",
+      "rank": 14,
+      "percentile": 0.9579,
+      "confidence": 95.8,
+      "direction": "BUY",
+      "entry_price": 3340.60009765625,
+      "stop_loss": 3212.39,
+      "target": 3597.01,
+      "risk_reward": 2.0,
+      "reasons": [
+        "Momentum rank 14/310",
+        "percentile 96%"
+      ],
+      "expected_return": 0.0338,
+      "top_decile_prob": 1.0
+    },
+    {
+      "symbol": "MOTILALOFS",
+      "style": "momentum",
+      "rank": 15,
+      "percentile": 0.9547,
+      "confidence": 95.5,
+      "direction": "BUY",
+      "entry_price": 968.3499755859376,
+      "stop_loss": 939.6,
+      "target": 1025.84,
+      "risk_reward": 2.0,
+      "reasons": [
+        "Momentum rank 15/310",
+        "percentile 95%"
+      ],
+      "expected_return": 0.0336,
+      "top_decile_prob": 1.0
+    },
+    {
+      "symbol": "RAIN",
+      "style": "momentum",
+      "rank": 16,
+      "percentile": 0.9515,
+      "confidence": 95.2,
+      "direction": "BUY",
+      "entry_price": 187.7400054931641,
+      "stop_loss": 174.86,
+      "target": 213.49,
+      "risk_reward": 2.0,
+      "reasons": [
+        "Momentum rank 16/310",
+        "percentile 95%"
+      ],
+      "expected_return": 0.0333,
+      "top_decile_prob": 1.0
+    },
+    {
+      "symbol": "APARINDS",
+      "style": "momentum",
+      "rank": 17,
+      "percentile": 0.9482,
+      "confidence": 94.8,
+      "direction": "BUY",
+      "entry_price": 14174.0,
+      "stop_loss": 13053.29,
+      "target": 16415.43,
+      "risk_reward": 2.0,
+      "reasons": [
+        "Momentum rank 17/310",
+        "percentile 95%"
+      ],
+      "expected_return": 0.0331,
+      "top_decile_prob": 1.0
+    },
+    {
+      "symbol": "GLAND",
+      "style": "momentum",
+      "rank": 18,
+      "percentile": 0.945,
+      "confidence": 94.5,
+      "direction": "BUY",
+      "entry_price": 2462.300048828125,
+      "stop_loss": 2358.86,
+      "target": 2669.17,
+      "risk_reward": 2.0,
+      "reasons": [
+        "Momentum rank 18/310",
+        "percentile 94%"
+      ],
+      "expected_return": 0.0328,
+      "top_decile_prob": 1.0
+    },
+    {
+      "symbol": "NIITLTD",
+      "style": "momentum",
+      "rank": 19,
+      "percentile": 0.9417,
+      "confidence": 94.2,
+      "direction": "BUY",
+      "entry_price": 103.4800033569336,
+      "stop_loss": 92.97,
+      "target": 124.5,
+      "risk_reward": 2.0,
+      "reasons": [
+        "Momentum rank 19/310",
+        "percentile 94%"
+      ],
+      "expected_return": 0.0326,
+      "top_decile_prob": 1.0
+    },
+    {
+      "symbol": "NIACL",
+      "style": "momentum",
+      "rank": 20,
+      "percentile": 0.9385,
+      "confidence": 93.8,
+      "direction": "BUY",
+      "entry_price": 185.82000732421875,
+      "stop_loss": 168.48,
+      "target": 220.5,
+      "risk_reward": 2.0,
+      "reasons": [
+        "Momentum rank 20/310",
+        "percentile 94%"
+      ],
+      "expected_return": 0.0324,
+      "top_decile_prob": 1.0
+    }
+  ]
+}

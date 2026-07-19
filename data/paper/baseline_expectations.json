@@ -1,0 +1,58 @@
+{
+  "frozen_at": "2026-07-07",
+  "note": "Pre-registered live-vs-backtest expectations for the paper window (top-20 book stats from the 12-fold expanded walk-forward OOS fold predictions). Never edit after the window starts.",
+  "engines": {
+    "momentum": {
+      "horizon": 20,
+      "top_n": 20,
+      "cost_bps_side": 30.0,
+      "window": "2023-07..2026-06 (12-fold expanded, 756 OOS dates)",
+      "rank_ic_training": 0.0938,
+      "hit_rate_vs_universe": 0.5913,
+      "mean_gross_h": 0.02408,
+      "mean_bench_h": 0.01692,
+      "mean_excess_h": 0.00716,
+      "net_iid": {
+        "sharpe": 0.8953,
+        "n_periods": 48,
+        "period_mean": 0.01844,
+        "cagr": 0.2183,
+        "max_drawdown": -0.4011
+      },
+      "excess_iid": {
+        "sharpe": 0.132,
+        "n_periods": 48,
+        "period_mean": 0.00136,
+        "cagr": 0.009,
+        "max_drawdown": -0.2505
+      },
+      "decile_spread_training": 0.0351
+    },
+    "swing": {
+      "horizon": 10,
+      "top_n": 20,
+      "cost_bps_side": 30.0,
+      "window": "2023-07..2026-06 (12-fold expanded, 756 OOS dates)",
+      "rank_ic_training": 0.0544,
+      "hit_rate_vs_universe": 0.5291,
+      "mean_gross_h": 0.01172,
+      "mean_bench_h": 0.00807,
+      "mean_excess_h": 0.00365,
+      "net_iid": {
+        "sharpe": 0.6418,
+        "n_periods": 84,
+        "period_mean": 0.00612,
+        "cagr": 0.134,
+        "max_drawdown": -0.3726
+      },
+      "excess_iid": {
+        "sharpe": -0.4224,
+        "n_periods": 84,
+        "period_mean": -0.00196,
+        "cagr": -0.0545,
+        "max_drawdown": -0.2739
+      },
+      "decile_spread_training": 0.0157
+    }
+  }
+}

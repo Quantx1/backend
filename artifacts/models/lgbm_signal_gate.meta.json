@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "trainer": "scripts.train_lgbm (legacy, pre-PR-169)",
+  "feature_order": [
+    "close",
+    "rsi_14",
+    "macd",
+    "macd_signal",
+    "bb_upper",
+    "bb_lower",
+    "bb_percent",
+    "ema_20",
+    "ema_50",
+    "atr_14",
+    "volume_ratio",
+    "obv",
+    "vwap_diff",
+    "body_pct",
+    "wick_pct"
+  ],
+  "n_features": 15,
+  "label_map": {
+    "0": "HOLD",
+    "1": "BUY",
+    "2": "SELL"
+  },
+  "num_class": 3,
+  "fwd_return_days": 5,
+  "notes": "Backfill metadata for the originally-shipped 15-feature legacy model from scripts/train_lgbm.py. Once ml.training.trainers.lgbm_signal_gate retrains on RunPod, the produced lgbm_signal_gate.meta.json will overwrite this file with the v2 schema (30 features, 0=SELL/1=HOLD/2=BUY)."
+}
