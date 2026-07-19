@@ -1,0 +1,206 @@
+# ============================================================================
+# QUANT X - PRODUCTION DEPENDENCIES
+# Python 3.11+ Required
+# ============================================================================
+
+# ============================================================================
+# WEB FRAMEWORK
+# ============================================================================
+fastapi>=0.115.0,<1.0.0
+uvicorn[standard]>=0.32.0
+python-multipart>=0.0.9
+pydantic>=2.9.0,<3.0.0
+pydantic-settings>=2.5.0
+pydantic[email]>=2.9.0,<3.0.0
+
+# ============================================================================
+# DATABASE & AUTHENTICATION
+# ============================================================================
+supabase>=2.10.0,<3.0.0
+postgrest>=0.18.0
+realtime>=2.0.0
+storage3>=0.8.0
+gotrue>=2.10.0
+
+# ============================================================================
+# OBJECT STORAGE — Backblaze B2 (model registry artifact store)
+# ============================================================================
+b2sdk>=2.0.0
+
+# ============================================================================
+# QUANT FRAMEWORK — Microsoft Research Qlib + NSE market calendar
+# ============================================================================
+# Qlib provides the Alpha158 factor library + LGBModel wrapper used by the
+# F2/F3/F5/F10 alpha pipeline. NSE-adapted via ingestion script + NSE
+# pandas_market_calendars calendar (see backend/ai/qlib/).
+pyqlib>=0.9.3                      # Microsoft Research quant framework
+pandas_market_calendars>=4.4       # NSE / BSE trading calendars
+exchange_calendars>=4.5            # Secondary calendar source (XBSE / fallback)
+
+# ============================================================================
+# ZERO-SHOT TIME-SERIES FORECASTERS — F3 Momentum
+# ============================================================================
+# Amazon Chronos-Bolt Base 205M — zero-shot foundation model, no training.
+# See backend/ai/forecast/.
+#
+# (Google TimesFM was removed from v1 in the PR-M scope cut on 2026-05-25.
+#  The adapter was deleted; the ensemble API still exposes a `timesfm`
+#  parameter slot in case we ever bring it back, but nothing populates it.)
+chronos-forecasting>=1.4.0         # Amazon Chronos-Bolt
+
+# ============================================================================
+# PORTFOLIO OPTIMIZATION — F5 AI SIP (Black-Litterman + Markowitz)
+# ============================================================================
+pyportfolioopt>=1.5.5              # Markowitz + Black-Litterman + HRP
+
+# ============================================================================
+# OBSERVABILITY — PR 16 (Sentry already in + posthog for product analytics)
+# ============================================================================
+posthog>=3.0.0                     # product analytics events (conversion funnel, tier gate hits)
+
+# ============================================================================
+# PAYMENTS
+# ============================================================================
+razorpay>=1.4.1
+
+# ============================================================================
+# BROKER APIS
+# ============================================================================
+kiteconnect>=4.2.0
+smartapi-python>=1.3.0         # Angel One SmartAPI SDK
+upstox-python-sdk>=2.27.0      # Upstox V3 MarketDataStreamerV3 (full_d30 30-level depth)
+requests>=2.31.0
+websocket-client>=1.7.0
+
+# ============================================================================
+# MARKET DATA PROVIDERS
+# ============================================================================
+yfinance>=0.2.31               # Free market data (default provider, no API key needed)
+jugaad-data>=0.24              # NSE bhavcopy (secondary OHLCV when Kite token expired)
+
+# ============================================================================
+# DATA PROCESSING
+# ============================================================================
+pandas>=2.1.4
+numpy>=1.26.3
+nsepy>=0.8
+nselib>=2.5.1                  # NSE reference + bhavcopy + corporate actions (centralized EOD plane)
+ta>=0.11.0
+scipy>=1.11.4
+
+# ============================================================================
+# MACHINE LEARNING
+# ============================================================================
+scikit-learn>=1.4.0
+lightgbm>=4.0.0
+hmmlearn>=0.3.0
+catboost>=1.2.2
+xgboost>=2.0.0                     # F9 EarningsScout surprise classifier (PR 51)
+torch>=2.1.2
+# pytorch-forecasting + lightning have no Python 3.10 wheels on PyPI's
+# resolver right now. Only used by the vix_tft trainer (GPU-only, not
+# in tonight's CPU-runnable set). Install on demand when training vix_tft:
+#   pip install pytorch-forecasting pytorch-lightning
+# Re-enable here once we're on a Python 3.11+ pod image.
+# pytorch-forecasting>=1.0.0
+# pytorch-lightning>=2.0.0
+transformers>=4.36.2
+# LLM agents + finance assistant route through OpenRouter (open models) over
+# plain httpx — no provider SDKs needed. Gemini (`google-genai`) and Anthropic
+# (`anthropic`) were removed 2026-06-04 when the last consumers were migrated.
+
+# ============================================================================
+# TASK SCHEDULING
+# ============================================================================
+apscheduler>=3.10.4
+python-crontab>=3.0.0
+
+# ============================================================================
+# CACHING & REAL-TIME
+# ============================================================================
+redis>=5.0.1
+python-redis-lock>=4.0.0
+aioredis>=2.0.1
+
+# ============================================================================
+# SECURITY
+# ============================================================================
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+python-dotenv>=1.0.0
+cryptography>=41.0.7
+pyjwt>=2.8.0
+pyotp>=2.9.0  # For TOTP in Angel One broker auth
+
+# ============================================================================
+# PUSH NOTIFICATIONS & EMAIL
+# ============================================================================
+pywebpush>=2.0.0               # Web Push (VAPID)
+resend>=2.0.0                   # Transactional email service
+
+# ============================================================================
+# HTTP CLIENTS
+# ============================================================================
+httpx>=0.28.1,<1.0.0
+aiohttp>=3.9.1
+
+# ============================================================================
+# RSS / NEWS PARSING
+# ============================================================================
+feedparser>=6.0.0
+
+# ============================================================================
+# UTILITIES
+# ============================================================================
+python-dateutil>=2.8.2
+pytz>=2023.3.post1
+orjson>=3.9.12
+
+# ============================================================================
+# F4 AUTOPILOT INFERENCE (PR 131)
+# ----------------------------------------------------------------------------
+# Inference-only deps — Stable-Baselines3 needs to load policies in the
+# request path. Gymnasium ships as a transitive dep but we pin it
+# explicitly so SB3 v2.x always finds the API it expects.
+# Heavy training deps (chronos, hmmlearn, lightgbm, xgboost,
+# pyportfolioopt, finrl-x utilities) live in requirements-train.txt
+# (PR 151 split) so the API container stays slim.
+# ============================================================================
+stable-baselines3>=2.3.0
+gymnasium>=0.29.1
+
+# F1 Intraday LSTM (PR 135) — ONNX runtime for CPU inference.
+onnx>=1.16.0
+onnxruntime>=1.17.0
+
+# ============================================================================
+# MONITORING & LOGGING
+# ============================================================================
+sentry-sdk[fastapi]>=1.39.2
+python-json-logger>=2.0.7
+
+# ============================================================================
+# TESTING
+# ============================================================================
+pytest>=7.4.4
+pytest-asyncio>=0.23.3
+pytest-cov>=4.1.0
+pytest-mock>=3.12.0
+faker>=22.0.0
+fakeredis>=2.20.0
+
+# ============================================================================
+# CODE QUALITY
+# ============================================================================
+black>=24.1.1
+flake8>=7.0.0
+mypy>=1.8.0
+isort>=5.13.2
+pre-commit>=3.6.0
+pylint>=3.0.3
+
+# ============================================================================
+# DOCUMENTATION
+# ============================================================================
+mkdocs>=1.5.3
+mkdocs-material>=9.5.3

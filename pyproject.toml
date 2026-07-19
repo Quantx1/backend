@@ -1,0 +1,51 @@
+# Quant X — project metadata, tooling, and the architectural import contract.
+# NOTE: pytest config stays in pytest.ini (authoritative); this file does NOT
+# declare [tool.pytest.ini_options] so test collection is unchanged.
+
+[project]
+name = "quantx"
+version = "0.1.0"
+description = "Quant X — AI/ML trading-signal platform (4-engine ML/DL + FastAPI backend)"
+requires-python = ">=3.12"
+
+# Top-level first-party packages (declares the production layout). The app runs
+# from the repo root via sys.path; this is documentation + tooling anchor, not
+# an install target (no [build-system] on purpose).
+[tool.setuptools]
+packages = ["backend", "ml"]
+
+# ── ruff (lint/format) ──────────────────────────────────────────────────────
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = [".venv", "node_modules", "frontend", "infrastructure"]
+
+[tool.ruff.lint]
+select = ["E9", "F63", "F7", "F82", "F401"]  # start conservative (syntax/undefined/unused)
+ignore = ["E501"]
+
+# ── mypy ────────────────────────────────────────────────────────────────────
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+follow_imports = "silent"
+files = ["backend", "ml"]
+
+# ── import-linter — the architectural contract (run: `lint-imports`) ─────────
+# Encodes the production boundary: the training layer (ml/) must NOT depend on
+# the web/serving app layer (backend.api / backend.services / backend.platform).
+# ml/ may use shared domain (backend.ai.*, backend.data.*) until the core/ ring
+# is carved out; that carve-out is the next restructure phase, after which a
+# stricter 3-ring contract (core < ml, backend) replaces this.
+[tool.importlinter]
+root_packages = ["backend", "ml"]
+
+[[tool.importlinter.contracts]]
+name = "Training layer must not import the web/serving app layer"
+type = "forbidden"
+source_modules = ["ml"]
+forbidden_modules = [
+    "backend.api",
+    "backend.services",
+    "backend.platform",
+]

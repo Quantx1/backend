@@ -1,0 +1,25 @@
+# Nixpacks build config for Railway / Render / Fly Quant X v1 deploy.
+#
+# Why we have this file in addition to railway.toml:
+#   - railway.toml picks the builder (NIXPACKS) and sets the start command.
+#   - nixpacks.toml gives us deterministic control over the Python version
+#     and lets us skip the wasteful TA-Lib C library install that the
+#     Dockerfile was doing (we only use the Python `ta` package).
+#
+# Final image size: ~600 MB (Python 3.12 + pip deps + ml model cache slot).
+
+[phases.setup]
+nixPkgs = ["python312", "gcc", "pkg-config"]
+
+[phases.install]
+cmds = [
+  "python -m venv --copies /opt/venv",
+  ". /opt/venv/bin/activate && pip install --upgrade pip",
+  ". /opt/venv/bin/activate && pip install -r requirements.txt",
+  # Force-pin huggingface-hub last so downstream installs don't downgrade
+  # it (transformers 4.57+ hard-requires >=0.34.0).
+  ". /opt/venv/bin/activate && pip install --force-reinstall --no-deps 'huggingface-hub>=0.34.0,<1.0'",
+]
+
+[start]
+cmd = ". /opt/venv/bin/activate && uvicorn backend.api.app:app --host 0.0.0.0 --port $PORT"
