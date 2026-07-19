@@ -1,0 +1,2 @@
+# Runtime B2 model cache — restored at startup, never baked into the image.
+artifacts/cache/

@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Pre-commit hook — runs all repo-level guards.
+# Enable once with: git config core.hooksPath .githooks
+
+set -e
+
+ROOT="$(git rev-parse --show-toplevel)"
+bash "$ROOT/scripts/check_legacy_branding.sh"
