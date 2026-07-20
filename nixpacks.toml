@@ -2,11 +2,15 @@
 #
 # Why we have this file in addition to railway.toml:
 #   - railway.toml picks the builder (NIXPACKS) and sets the start command.
-#   - nixpacks.toml gives us deterministic control over the Python version
-#     and lets us skip the wasteful TA-Lib C library install that the
-#     Dockerfile was doing (we only use the Python `ta` package).
+#   - nixpacks.toml gives us deterministic control over the Python version.
 #
-# Final image size: ~600 MB (Python 3.12 + pip deps + ml model cache slot).
+# The Dockerfile is kept in sync with this file but is NOT used on Railway
+# (railway.toml pins the NIXPACKS builder). It exists for local `docker build`
+# and for platforms that auto-detect a Dockerfile — Fly, Render, plain Docker.
+# If you change install steps here, mirror them there.
+#
+# Image size: ~1.5 GB. requirements.txt pulls CPU-only torch wheels via
+# --extra-index-url; on the default PyPI index it would be ~4-6 GB.
 
 [phases.setup]
 nixPkgs = ["python312", "gcc", "pkg-config"]

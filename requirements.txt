@@ -1,7 +1,16 @@
 # ============================================================================
 # QUANT X - PRODUCTION DEPENDENCIES
-# Python 3.11+ Required
+# Python 3.12 (see runtime.txt)
 # ============================================================================
+# Serving is CPU-only. Without this index the default PyPI torch wheel drags
+# in ~2.5 GB of nvidia-* CUDA packages that nothing here can use. The CPU
+# wheels carry a `+cpu` local version, which pip prefers over the plain PyPI
+# version, so torch and its friends resolve to the CPU build.
+# GPU training runs on RunPod against requirements-train.txt in the ml repo.
+--extra-index-url https://download.pytorch.org/whl/cpu
+
+# Dev/test/lint/docs tooling lives in requirements-dev.txt — keep it out of
+# the API image.
 
 # ============================================================================
 # WEB FRAMEWORK
@@ -81,7 +90,10 @@ jugaad-data>=0.24              # NSE bhavcopy (secondary OHLCV when Kite token e
 # ============================================================================
 # DATA PROCESSING
 # ============================================================================
-pandas>=2.1.4
+# Upper bound is load-bearing: pandas 3.x is out and a bare `>=2.1.4` now
+# resolves to it. The whole codebase (and the 907/918 passing test run) was
+# written against pandas 2.x. Lift this only with a full test pass.
+pandas>=2.1.4,<3.0.0
 numpy>=1.26.3
 nsepy>=0.8
 nselib>=2.5.1                  # NSE reference + bhavcopy + corporate actions (centralized EOD plane)
@@ -162,9 +174,12 @@ orjson>=3.9.12
 # Inference-only deps — Stable-Baselines3 needs to load policies in the
 # request path. Gymnasium ships as a transitive dep but we pin it
 # explicitly so SB3 v2.x always finds the API it expects.
-# Heavy training deps (chronos, hmmlearn, lightgbm, xgboost,
-# pyportfolioopt, finrl-x utilities) live in requirements-train.txt
-# (PR 151 split) so the API container stays slim.
+#
+# NOTE: an older comment here claimed the heavy training deps had been split
+# out to requirements-train.txt. That split was never done in this repo —
+# chronos, hmmlearn, lightgbm, xgboost and pyportfolioopt are all still
+# above, because the weekend CPU retrain job (scheduler.py `_run_retraining`)
+# runs in this same container and imports them.
 # ============================================================================
 stable-baselines3>=2.3.0
 gymnasium>=0.29.1
@@ -178,29 +193,3 @@ onnxruntime>=1.17.0
 # ============================================================================
 sentry-sdk[fastapi]>=1.39.2
 python-json-logger>=2.0.7
-
-# ============================================================================
-# TESTING
-# ============================================================================
-pytest>=7.4.4
-pytest-asyncio>=0.23.3
-pytest-cov>=4.1.0
-pytest-mock>=3.12.0
-faker>=22.0.0
-fakeredis>=2.20.0
-
-# ============================================================================
-# CODE QUALITY
-# ============================================================================
-black>=24.1.1
-flake8>=7.0.0
-mypy>=1.8.0
-isort>=5.13.2
-pre-commit>=3.6.0
-pylint>=3.0.3
-
-# ============================================================================
-# DOCUMENTATION
-# ============================================================================
-mkdocs>=1.5.3
-mkdocs-material>=9.5.3

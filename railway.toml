@@ -2,8 +2,16 @@
 builder = "NIXPACKS"
 
 [deploy]
-startCommand = "uvicorn backend.api.app:app --host 0.0.0.0 --port $PORT"
+# Must activate the venv that nixpacks.toml installed deps into — without it
+# uvicorn resolves against system Python and none of the deps are present.
+startCommand = ". /opt/venv/bin/activate && uvicorn backend.api.app:app --host 0.0.0.0 --port $PORT"
 healthcheckPath = "/health"
-healthcheckTimeout = 100
+# Startup eagerly loads the LGBM gate, regime HMM and TFT predictor
+# (app.py lifespan). Regime alone takes 40+s cold, so 100s was too tight.
+healthcheckTimeout = 300
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 10
+
+# NOTE: keep this service at ONE replica. backend/platform/scheduler.py runs
+# 49 APScheduler jobs in-process; a second replica double-fires every one of
+# them, and the websocket + broker tick streams assume a single owner.
