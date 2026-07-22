@@ -112,4 +112,7 @@ def volume_intel(symbol: str, *, use_llm: bool = False, user_id: Optional[str] =
         narrative = grounded_reason(
             {"symbol": sym, **intel}, f"What does today's volume and delivery say about {sym}?",
             cache_key=f"volintel:{sym}:{date.today().isoformat()}", user_id=user_id)
-    return {"symbol": sym, **intel, "drivers": drivers, "narrative": narrative}
+    # Last 20 sessions for the card's bar sparkline (raw values — the UI
+    # scales them against avg_volume_20d).
+    series = [round(float(v)) for v in volumes[-20:]] if volumes else []
+    return {"symbol": sym, **intel, "series": series, "drivers": drivers, "narrative": narrative}

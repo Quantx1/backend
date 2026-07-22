@@ -89,21 +89,29 @@ def _from_quantiles(p10: Optional[float], p50: Optional[float], p90: Optional[fl
 
 
 def _latest_signal_row(sb, symbol: str) -> Dict[str, Any]:
+    # Schema truth (2026-07-21): the table has `generated_at` (not created_at)
+    # and `target_1/2/3` (not target). The old select referenced both ghosts,
+    # so this lookup threw on EVERY call → Swing/Intraday blocks and the
+    # latest-signal trade levels were empty for everyone, forever.
     try:
         rows = (
             sb.table("signals")
             .select(
-                "id, symbol, direction, entry_price, stop_loss, target, confidence, "
+                "id, symbol, direction, entry_price, stop_loss, target_1, confidence, "
                 "tft_p10, tft_p50, tft_p90, lgbm_buy_prob, qlib_score, qlib_rank, "
                 "timesfm_p50, chronos_p50, hgnc_up_prob, finbert_sentiment, "
-                "regime_at_signal, explanation_text, signal_type, created_at"
+                "regime_at_signal, explanation_text, signal_type, status, generated_at"
             )
             .eq("symbol", symbol)
-            .order("created_at", desc=True)
+            .order("generated_at", desc=True)
             .limit(1)
             .execute()
         )
-        return (rows.data or [None])[0] or {}
+        row = (rows.data or [None])[0] or {}
+        if row:
+            row["target"] = row.get("target_1")
+            row["created_at"] = row.get("generated_at")
+        return row
     except Exception as exc:
         logger.debug("dossier signal lookup failed %s: %s", symbol, exc)
         return {}
@@ -310,9 +318,13 @@ def _block_intraday(signal_row: Dict[str, Any], is_pro: bool) -> Dict[str, Any]:
 
 def _block_earnings(er: Dict[str, Any], is_pro: bool) -> Dict[str, Any]:
     bp = _safe_float(er.get("beat_prob"))
+    # 'earnings_predictor' was dropped from PUBLIC_MODELS in the 2026-06-06
+    # registry cleanup — a hard index here 500'd the ENTIRE dossier (and froze
+    # the stock page's Analysis Agent). Guarded lookup with an honest fallback.
+    _em = PUBLIC_MODELS.get("earnings_predictor")
     out: Dict[str, Any] = {
         "engine": public_label("earnings_predictor"),
-        "role": PUBLIC_MODELS["earnings_predictor"].role,
+        "role": _em.role if _em else "Earnings surprise read",
         "available": bp is not None,
     }
     if bp is not None:
@@ -388,12 +400,15 @@ async def get_dossier(
     except Exception as exc:
         logger.debug("dossier scores block failed %s: %s", canon, exc)
 
+    # Earnings-predictor was removed from the registry 2026-06-06 and its
+    # `earnings_predictions` table is empty — a permanently-dead engine row
+    # helps nobody, so it's out of the roster. Swing/Intraday stay (real
+    # engines that light up when a fresh signal row / live feed exists).
     engines = [
         _block_swing(signal_row, is_pro),
         _block_rank(alpha_row, is_pro),
         _block_sentiment(sent, is_pro),
         _block_intraday(signal_row, is_pro),
-        _block_earnings(earnings, is_pro),
         _block_regime(regime_row, is_pro),
     ]
     consensus = _overall_tag(engines)
@@ -407,6 +422,8 @@ async def get_dossier(
         "engines": engines,
         "debate_available": is_elite,
         "scores": scores_block,
+        # Trade levels only for a LIVE signal — an expired row's entry/SL/target
+        # is stale noise, not a plan.
         "latest_signal": {
             "id": signal_row.get("id"),
             "direction": signal_row.get("direction"),
@@ -415,7 +432,7 @@ async def get_dossier(
             "target": _safe_float(signal_row.get("target")),
             "created_at": signal_row.get("created_at"),
             "explanation_text": signal_row.get("explanation_text") if is_pro else None,
-        } if signal_row else None,
+        } if signal_row and signal_row.get("status") in ("active", "triggered") else None,
     }
 
 

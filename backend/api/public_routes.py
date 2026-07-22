@@ -543,16 +543,37 @@ _TICKER_INDICES = [
 ]
 
 
+def _nse_session_open_now() -> bool:
+    """True while the NSE cash session could be live (IST weekday, 09:00-15:40
+    with buffer for pre-open auction + settlement lag). Used to clamp this
+    PUBLIC endpoint to settled closes — during market hours the last daily bar
+    from the provider is the live forming candle, and serving that ungated
+    would leak near-live NSE index levels (SEBI Path-A: live index data needs
+    a licence or the user's own broker feed)."""
+    try:
+        from zoneinfo import ZoneInfo
+        now = datetime.now(ZoneInfo("Asia/Kolkata"))
+        if now.weekday() >= 5:
+            return False
+        minutes = now.hour * 60 + now.minute
+        return 9 * 60 <= minutes <= 15 * 60 + 40
+    except Exception:
+        return True  # fail-closed: assume open → serve settled closes
+
+
 def _index_quote(td: str, yf: str) -> Optional[Dict[str, Any]]:
-    """Pull the last two daily closes and compute the day change. Falls
-    back across providers via the screener engine's existing helper."""
+    """Last SETTLED close + day change. While the session is live the forming
+    daily bar is dropped, so this endpoint only ever serves EOD-published
+    levels (safe to keep public); after the close it serves today's close."""
     try:
         from ..data.screener.engine import LiveScreenerEngine
         engine = LiveScreenerEngine()
         df = engine._fetch_index_df(td, yf, period="5d")
         if df is None or df.empty or "close" not in df.columns:
             return None
-        closes = df["close"].dropna().tail(2)
+        closes = df["close"].dropna().tail(3)
+        if _nse_session_open_now() and len(closes) >= 2:
+            closes = closes.iloc[:-1]  # drop the live forming bar
         if len(closes) < 1:
             return None
         last = float(closes.iloc[-1])
@@ -585,7 +606,13 @@ async def get_indices():
             **(quote or {"last": None, "change": None, "change_pct": None}),
         })
     return _with_cache(
-        {"indices": out, "computed_at": datetime.utcnow().isoformat() + "Z"},
+        {
+            "indices": out,
+            # honesty label: this public endpoint only ever serves settled
+            # EOD closes (the forming bar is clamped during market hours)
+            "as_of": "settled_close",
+            "computed_at": datetime.utcnow().isoformat() + "Z",
+        },
         max_age=30,
     )
 

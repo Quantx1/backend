@@ -545,19 +545,52 @@ async def lifespan(app: FastAPI):
     async def _prewarm_market_caches():
         try:
             from . import market_routes as _mkt
+            # Warm every public market cache the /markets page reads on first
+            # paint — regime, indices, global cues, FII/DII and the AI Daily
+            # Briefing (headline + narrative) — so the first visitor after a
+            # (re)start gets an instant, fully-populated render instead of a
+            # cold yfinance/LLM block or an honest-empty flash.
+            # Heal the regime timeline first (idempotent ensemble refresh over
+            # the candle store) so the gauge never serves a stale row after a
+            # reaped dev server / missed 8:15 job. A few seconds, off-thread.
+            async def _heal_regime():
+                from ..services.regime.refresh import refresh_regime_history
+                return await asyncio.to_thread(refresh_regime_history, 30)
+
+            # get_market_indices is NOT warmed: it takes a Request (entitlement
+            # gate) and calling it bare raised a synchronous TypeError that
+            # aborted this whole gather — leaving every cache cold on boot.
             results = await asyncio.gather(
+                _heal_regime(),
                 _mkt.get_market_regime_public(),
-                _mkt.get_market_indices(),
+                _mkt.get_global_cues(),
+                _mkt.get_fii_dii_eod(),
+                _mkt.get_market_briefing("auto"),
+                _mkt.get_market_news(),
                 return_exceptions=True,
             )
             for r in results:
                 if isinstance(r, Exception):
                     logger.warning(f"Market pre-warm failed: {r}")
-            logger.info("✅ Market caches pre-warmed (regime + indices)")
+            logger.info("✅ Market caches pre-warmed (regime + indices + global + fii/dii + briefing)")
         except Exception as e:
             logger.warning(f"Market pre-warm setup failed: {e}")
 
     asyncio.create_task(_prewarm_market_caches())
+
+    # Warm the LiveScreener computed table (500-symbol indicator grid) in the
+    # background so the sector-heatmap / power-screeners serve instantly instead
+    # of 503-ing on the first cold request. Fire-and-forget off-thread — the
+    # ~25-90s compute must never block boot or other requests.
+    async def _prewarm_screener_cache():
+        try:
+            from ..data.screener.engine import get_live_screener
+            await asyncio.to_thread(get_live_screener()._get_computed_data)
+            logger.info("✅ Screener/sector cache pre-warmed")
+        except Exception as e:
+            logger.warning(f"Screener pre-warm failed: {e}")
+
+    asyncio.create_task(_prewarm_screener_cache())
 
     yield
 

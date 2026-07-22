@@ -130,8 +130,17 @@ _STRONG_ROLES = {
 }
 _DEEP_ELIGIBLE_ROLES = {"doctor", "debate"}
 
+# Market-brief roles run on the DEEP reasoning model unconditionally: these
+# are ONE day-cached call each (briefing narrative + the what's-happening
+# analysis), shared by every visitor — flagship public output where reasoning
+# quality matters most and the marginal cost is a rounding error. The deep
+# model's fallback chain still degrades gracefully when it's unavailable.
+_MARKET_BRIEF_ROLES = {"market_brief"}
+
 
 def _default_model_for(role: str) -> str:
+    if role in _MARKET_BRIEF_ROLES:
+        return settings.LLM_DEEP_MODEL
     if role in _CHAT_FAST_ROLES:
         return settings.LLM_CHAT_MODEL
     if role in _FAST_ROLES:

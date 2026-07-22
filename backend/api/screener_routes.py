@@ -816,14 +816,30 @@ async def news_scan(
 
 async def _computed_data_or_503(screener, timeout: float = 25.0):
     """Load the cached indicator table off-thread with a HARD timeout. A cold or
-    slow ``_get_computed_data`` load must fail fast with 503 rather than hang the
-    request indefinitely (observed >90s, no response — 2026-06-22). The abandoned
-    worker thread keeps running and warms the cache, so a retry succeeds."""
+    slow ``_get_computed_data`` load must fail fast rather than hang the request
+    indefinitely (observed >90s, no response — 2026-06-22). The abandoned worker
+    thread keeps running and warms the cache, so a retry succeeds.
+
+    STALE-WHILE-REVALIDATE (2026-07-20): the cache is only overwritten on a
+    *successful* recompute, so on timeout the last-good table is still in memory.
+    Serve that (slightly stale) instead of a hard 503 — the background thread is
+    already re-warming it. Only 503 when the cache has NEVER been populated (the
+    very first cold start after boot). This is what fixes the flaky sector heatmap
+    ('sometimes loads, sometimes 503') — once warm, it always returns data."""
     try:
         return await asyncio.wait_for(
             asyncio.to_thread(screener._get_computed_data), timeout=timeout
         )
     except asyncio.TimeoutError:
+        cache = getattr(screener, "_computed_cache", None)
+        if cache:
+            summary_df, per_symbol_dfs, _cached_at = cache
+            if summary_df is not None and not summary_df.empty:
+                logger.info(
+                    "screener: recompute exceeded %.0fs — serving last-good cache "
+                    "(revalidating in background)", timeout,
+                )
+                return summary_df, per_symbol_dfs
         raise HTTPException(503, "screener data not ready — try again in a moment")
 
 
@@ -2291,6 +2307,66 @@ async def run_batch_scan(
 # LIVE PRICE ENDPOINT
 # ============================================================================
 
+@router.get("/prices/eod")
+async def get_eod_prices(
+    symbols: str = Query(..., description="Comma-separated symbols (≤120)"),
+):
+    """Settled EOD close + day change for a batch of symbols, straight from
+    the candle store. SEBI-safe (settled published data, labelled) — the
+    non-broker fallback that keeps the /stocks board populated instead of
+    an all-dash grid. One window SQL; no live quotes touched."""
+    syms = [s.strip().upper().replace(".NS", "") for s in symbols.split(",") if s.strip()][:120]
+    if not syms:
+        return {"success": True, "prices": [], "label": "EOD · settled close"}
+
+    def _fetch():
+        from ..data.ohlc_store import pg_connect
+        conn = pg_connect()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    WITH ranked AS (
+                      SELECT stock_symbol, timestamp::date AS dt, close, volume,
+                             row_number() OVER (PARTITION BY stock_symbol
+                                                ORDER BY timestamp DESC) AS rn
+                      FROM candles
+                      WHERE interval='1d' AND stock_symbol = ANY(%s)
+                        AND timestamp >= now() - interval '15 days'
+                    )
+                    SELECT stock_symbol,
+                           max(CASE WHEN rn=1 THEN close END)  AS last,
+                           max(CASE WHEN rn=1 THEN dt END)     AS dt,
+                           max(CASE WHEN rn=1 THEN volume END) AS vol,
+                           max(CASE WHEN rn=2 THEN close END)  AS prev
+                    FROM ranked GROUP BY stock_symbol
+                    """,
+                    (syms,),
+                )
+                out = []
+                for sym, last, dt, vol, prev in cur.fetchall():
+                    if last is None:
+                        continue
+                    last_f = float(last)
+                    prev_f = float(prev) if prev else None
+                    chg = (last_f - prev_f) if prev_f else None
+                    out.append({
+                        "symbol": sym,
+                        "price": round(last_f, 2),
+                        "prev_close": round(prev_f, 2) if prev_f else None,
+                        "change": round(chg, 2) if chg is not None else None,
+                        "change_percent": round(chg / prev_f * 100.0, 2) if chg is not None and prev_f else None,
+                        "volume": int(vol or 0),
+                        "as_of": dt.isoformat() if dt else None,
+                    })
+                return out
+        finally:
+            conn.close()
+
+    prices = await asyncio.to_thread(_fetch)
+    return {"success": True, "prices": prices, "label": "EOD · settled close"}
+
+
 @router.get("/prices/live")
 async def get_live_prices(
     symbols: str = Query(..., description="Comma-separated symbols"),
@@ -2360,6 +2436,55 @@ async def get_live_prices(
     }
 
 
+_STOCK_META_CACHE: dict = {}
+_STOCK_META_TTL = 3600.0
+
+
+def _stock_meta_from_stores(sym: str) -> dict:
+    """Symbol metadata from our own stores (SEBI-safe, settled data):
+    52-week high/low from the candle store + name/sector from instruments.
+    1h in-process cache; honest-empty fields on any failure."""
+    import time as _time
+    hit = _STOCK_META_CACHE.get(sym)
+    if hit and (_time.monotonic() - hit[0]) < _STOCK_META_TTL:
+        return hit[1]
+    out: dict = {}
+    try:
+        from ..data.ohlc_store import pg_connect
+        conn = pg_connect()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT max(high), min(low) FROM candles
+                    WHERE interval='1d' AND stock_symbol=%s
+                      AND timestamp >= now() - interval '365 days'
+                    """,
+                    (sym,),
+                )
+                row = cur.fetchone()
+                if row and row[0] is not None:
+                    out["fiftyTwoWeekHigh"] = round(float(row[0]), 2)
+                    out["fiftyTwoWeekLow"] = round(float(row[1]), 2)
+                cur.execute(
+                    "SELECT name, sector FROM instruments "
+                    "WHERE symbol=%s AND exchange='NSE' LIMIT 1",
+                    (sym,),
+                )
+                irow = cur.fetchone()
+                if irow:
+                    if irow[0]:
+                        out["shortName"] = irow[0]
+                    if irow[1]:
+                        out["sector"] = irow[1]
+        finally:
+            conn.close()
+    except Exception as e:  # noqa: BLE001
+        logger.debug("stock meta enrich failed for %s: %s", sym, e)
+    _STOCK_META_CACHE[sym] = (_time.monotonic(), out)
+    return out
+
+
 @router.get("/prices/{symbol}")
 async def get_stock_price(
     symbol: str = Path(..., description="Stock symbol e.g. RELIANCE"),
@@ -2376,11 +2501,10 @@ async def get_stock_price(
     try:
         quote = await provider.get_quote_async(sym)
         if quote and quote.ltp > 0:
-            # Stock metadata (sector/marketcap from NSE data if available)
-            try:
-                info = {}
-            except Exception:
-                info = {}
+            # Stock metadata from OUR OWN stores (was a dead `info = {}` —
+            # the header's 52W range / sector / name rendered empty forever):
+            # candles → 52-week high/low; instruments → name + sector.
+            info = await asyncio.to_thread(_stock_meta_from_stores, sym)
 
             return {
                 "success": True,
@@ -2454,6 +2578,26 @@ async def breadth_route(
     A/D ratio + the cumulative A/D line (replaces the sector-average proxy)."""
     from ..services.scanners.breadth import breadth
     return {"success": True, **await asyncio.to_thread(breadth, days)}
+
+
+@router.get("/market-pulse")
+async def market_pulse_route():
+    """Market Pulse — EOD-derived internals for the daily desk: %-above
+    20/50/200-DMA breadth, 52-week new highs/lows, composite Breadth Score,
+    NIFTY HV vs INDIAVIX (options rich/cheap), FII/DII flow streaks, and the
+    'what changed vs yesterday' diff chips. All EOD · derived (SEBI-safe,
+    labelled); 10-min cache; honest-empty parts on failure."""
+    from ..services.scanners.market_pulse import market_pulse
+    return {"success": True, **await asyncio.to_thread(market_pulse)}
+
+
+@router.get("/movers-why")
+async def movers_why_route():
+    """Movers with WHY — the day's EOD movers annotated with their probable
+    cause (freshest multi-source headline, or an honest "no identifiable
+    news"). 0 tokens; 1h cache; settled EOD data + public headlines."""
+    from ..services.news.movers_why import movers_why
+    return {"success": True, **await movers_why()}
 
 
 @router.get("/alerts/live")
@@ -2632,6 +2776,66 @@ async def fusion_verdict_route(
     return {"success": True, **res}
 
 
+@router.get("/forecast-read/{symbol}")
+async def forecast_read_route(
+    symbol: str = Path(..., description="NSE symbol"),
+    use_llm: bool = Query(False, description="Grounded probability-honest narrative (cached/day)"),
+):
+    """Forecast tab's AI layer: empirical base rates + price structure +
+    event risk, optionally fused into a grounded read. Never a target."""
+    from ..services.explain.forecast_read import forecast_read
+    res = await asyncio.to_thread(forecast_read, symbol.strip().upper(), use_llm=use_llm)
+    return {"success": True, **res}
+
+
+@router.get("/technical-panel/{symbol}")
+async def technical_panel_route(
+    symbol: str = Path(..., description="NSE symbol"),
+):
+    """Full technical system for one symbol: oscillator suite with reads,
+    every MA with its vote, floor pivots + CPR, KDE-clustered swing S/R with
+    touch counts, Fibonacci, 52w anchors, ATR, candle patterns, and the
+    tallied technical-sentiment gauge. Deterministic, EOD, day-cached."""
+    from ..services.market.technical_panel import technical_panel
+    res = await asyncio.to_thread(technical_panel, symbol.strip().upper())
+    return {"success": True, **res}
+
+
+@router.get("/sentiment-read/{symbol}")
+async def sentiment_read_route(
+    symbol: str = Path(..., description="NSE symbol"),
+    use_llm: bool = Query(False, description="Fuse the layers into a grounded narrative (cached/day)"),
+):
+    """Three sentiment layers for one symbol — technical (indicator votes),
+    news mood, market regime — plus an optional grounded AI fusion read."""
+    from ..services.market.technical_panel import sentiment_read
+    res = await asyncio.to_thread(sentiment_read, symbol.strip().upper(), use_llm=use_llm)
+    return {"success": True, **res}
+
+
+@router.get("/deep-read/{symbol}")
+async def deep_read_route(
+    symbol: str = Path(..., description="NSE symbol"),
+    generate: bool = Query(False, description="Generate the deep narrative (deep-reasoning tier, cached per symbol/day)"),
+):
+    """AI Trade Desk — the per-symbol deep-reasoning synthesis (stock-page hero).
+
+    Fuses EVERY deterministic read (fused verdict + factors, day-move facts,
+    volume/delivery intel, CVD proxy, RS vs NIFTY, empirical base rates,
+    cached fundamentals) into one facts JSON. Facts + drivers are always
+    returned free; the PM-grade narrative runs on the deep-reasoning tier
+    ONLY when `generate=true` (or already cached today) so page loads cost
+    zero LLM tokens. Synthesis over EOD published data — analysis, never
+    advice."""
+    from ..services.explain.stock_deep_read import deep_read
+    res = await asyncio.to_thread(deep_read, symbol.strip().upper(), generate=generate)
+    return {
+        "success": True,
+        **res,
+        "note": "AI synthesis over EOD published data · analysis, not investment advice",
+    }
+
+
 @router.get("/volume-profile/{symbol}")
 async def volume_profile_route(
     symbol: str = Path(..., description="NSE symbol"),
@@ -2754,10 +2958,23 @@ async def market_depth(
     }
 
 
+# Lazy singleton so the yfinance provider's in-process history cache is
+# reused across "max"-range chart requests.
+_YF_FALLBACK = None
+
+
+def _yf_fallback_provider():
+    global _YF_FALLBACK
+    if _YF_FALLBACK is None:
+        from ..data.providers.yfinance import YFinanceProvider
+        _YF_FALLBACK = YFinanceProvider()
+    return _YF_FALLBACK
+
+
 @router.get("/prices/{symbol}/history")
 async def get_stock_history(
     symbol: str = Path(..., description="Stock symbol"),
-    days: int = Query(30, ge=1, le=365, description="Number of days"),
+    days: int = Query(30, ge=1, le=7300, description="Number of days"),
 ):
     """
     Get historical OHLCV data for a stock.
@@ -2777,11 +2994,31 @@ async def get_stock_history(
         period = "3mo"
     elif days <= 180:
         period = "6mo"
-    else:
+    elif days <= 365:
         period = "1y"
+    elif days <= 730:
+        period = "2y"
+    elif days <= 1825:
+        period = "5y"
+    else:
+        period = "max"
 
     try:
         df = await provider.get_historical_async(sym, period=period, interval="1d")
+
+        # Deep-history ("max") fallback: the Kite→jugaad chain struggles with
+        # decade-long ranges (jugaad can come back with a handful of rows).
+        # yfinance serves the full listing history — take whichever is deeper.
+        if period == "max" and (df is None or len(df) < 1300):
+            try:
+                from ..data.providers.yfinance import YFinanceProvider
+                ydf = await asyncio.to_thread(
+                    _yf_fallback_provider().get_historical, sym, "max", "1d"
+                )
+                if ydf is not None and not ydf.empty and (df is None or len(ydf) > len(df)):
+                    df = ydf
+            except Exception:
+                logger.debug("yfinance max-history fallback failed for %s", sym)
 
         if df is None or df.empty:
             return {"success": False, "symbol": sym, "error": "No data available"}

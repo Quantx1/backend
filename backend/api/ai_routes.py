@@ -664,15 +664,81 @@ async def trading_debate(
     if cached:
         return DebateResponse(**cached)
 
+    # Self-assemble any context the caller didn't send (the frontend posts an
+    # empty body) — a debate starved of fundamentals/technicals/news just
+    # reports "no confirmation" from every non-quant analyst. All pieces are
+    # best-effort reads of data the platform already computes, never invented.
+    import asyncio as _aio
+    sym = (signal.get("symbol") or "").upper()
+    fundamentals = body.fundamentals
+    stock_snapshot = body.stock_snapshot
+    news_headlines = body.news_headlines
+    regime = body.regime
+    vix = body.vix
+    if fundamentals is None and sym:
+        try:
+            rows_f = (
+                client.table("fundamentals_history")
+                .select("snapshot_date,pe,roe,roce,market_cap_cr,sales_growth,profit_growth,promoter_pct")
+                .eq("symbol", sym).order("snapshot_date", desc=True).limit(1).execute()
+            ).data or []
+            fundamentals = rows_f[0] if rows_f else None
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("debate fundamentals enrich failed: %s", exc)
+    if stock_snapshot is None and sym:
+        try:
+            from ..services.market.technical_panel import technical_panel
+            tp = await _aio.to_thread(technical_panel, sym)
+            if tp.get("available"):
+                stock_snapshot = {
+                    "price": tp.get("price"),
+                    "technical_sentiment": (tp.get("summary") or {}).get("overall"),
+                    "oscillators": [
+                        {"label": o["label"], "value": o["value"], "vote": o["vote"]}
+                        for o in (tp.get("oscillators") or [])[:6]
+                    ],
+                    "nearest_support": (tp.get("supports") or [None])[0],
+                    "nearest_resistance": (tp.get("resistances") or [None])[0],
+                    "atr_pct": (tp.get("atr") or {}).get("pct"),
+                }
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("debate technicals enrich failed: %s", exc)
+    if news_headlines is None and sym:
+        try:
+            rows_n = (
+                client.table("news_sentiment")
+                .select("sample_headlines,mean_score")
+                .eq("symbol", sym).order("trade_date", desc=True).limit(1).execute()
+            ).data or []
+            h = (rows_n[0] or {}).get("sample_headlines") if rows_n else None
+            if isinstance(h, list):
+                news_headlines = [str(x)[:200] for x in h[:10]]
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("debate news enrich failed: %s", exc)
+    if regime is None:
+        try:
+            from ..services.regime.refresh import current_regime
+            regime = await _aio.to_thread(current_regime) or (
+                {"regime": signal.get("regime_at_signal")} if signal.get("regime_at_signal") else None
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("debate regime enrich failed: %s", exc)
+    if vix is None:
+        try:
+            v = signal.get("vix_level")
+            vix = float(v) if v is not None else None
+        except (TypeError, ValueError):
+            vix = None
+
     try:
         result = await run_trading_debate(
             user_id=user.user_id,
             signal=signal,
-            fundamentals=body.fundamentals,
-            stock_snapshot=body.stock_snapshot,
-            news_headlines=body.news_headlines,
-            regime=body.regime,
-            vix=body.vix,
+            fundamentals=fundamentals,
+            stock_snapshot=stock_snapshot,
+            news_headlines=news_headlines,
+            regime=regime,
+            vix=vix,
             deep=deep,
             tier=user.tier.value,
         )

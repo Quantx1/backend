@@ -52,6 +52,7 @@ INDEX_NAME_MAP = {
     "NIFTY BANK": "NIFTY BANK",
     "VIX": "INDIA VIX",
     "INDIA VIX": "INDIA VIX",
+    "SENSEX": "SENSEX",
     "NIFTYIT": "NIFTY IT",
     "NIFTY IT": "NIFTY IT",
     "NIFTYFIN": "NIFTY FIN SERVICE",
@@ -128,6 +129,8 @@ class InstrumentTokenCache:
                 "NIFTY 50": 256265,
                 "NIFTY BANK": 260105,
                 "INDIA VIX": 264969,
+                # BSE SENSEX index token (exchange BSE)
+                "SENSEX": 265,
                 "NIFTY IT": 259849,
                 "NIFTY FIN SERVICE": 257801,
             }

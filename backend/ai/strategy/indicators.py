@@ -498,6 +498,32 @@ def _donchian(df: pd.DataFrame, window: int, side: str) -> float:
     return float(prior["high"].max()) if side == "high" else float(prior["low"].min())
 
 
+# ── 52-week-high/low proximity (George-Hwang style) ────────────────────────
+def _roll_extreme_dist(df: pd.DataFrame, window: int, side: str) -> float:
+    """% distance of the current close from the prior-``window``-bar extreme.
+
+    ``side="high"`` → typically ≤ 0 (e.g. -3.0 = 3% below the 52-week high),
+    so "near the high" reads as ``dist_52w_high_pct > -5``.
+    """
+    if len(df) < window + 1:
+        return float("nan")
+    prior = df.iloc[-(window + 1):-1]
+    ref = float(prior["high"].max()) if side == "high" else float(prior["low"].min())
+    if not math.isfinite(ref) or ref <= 0:
+        return float("nan")
+    return (float(df["close"].iloc[-1]) / ref - 1.0) * 100.0
+
+
+def _gap_pct(df: pd.DataFrame) -> float:
+    """Overnight gap: today's open vs yesterday's close, in percent."""
+    if len(df) < 2:
+        return float("nan")
+    pc = float(df["close"].iloc[-2])
+    if pc <= 0:
+        return float("nan")
+    return (float(df["open"].iloc[-1]) / pc - 1.0) * 100.0
+
+
 _INDICATOR_FNS: Dict[str, Callable[[pd.DataFrame], float]] = {
     # Momentum
     "rsi7": lambda df: _last(_rsi(df["close"], 7)),
@@ -534,6 +560,8 @@ _INDICATOR_FNS: Dict[str, Callable[[pd.DataFrame], float]] = {
     # Momentum additions (PR-FEATURES)
     "roc_10": lambda df: _last(_roc(df["close"], 10)),
     "roc_20": lambda df: _last(_roc(df["close"], 20)),
+    "roc_63": lambda df: _last(_roc(df["close"], 63)),
+    "roc_126": lambda df: _last(_roc(df["close"], 126)),
     "stoch_rsi_k": lambda df: _last(_stoch_rsi(df["close"])[0]),
     "stoch_rsi_d": lambda df: _last(_stoch_rsi(df["close"])[1]),
     # Volatility
@@ -580,6 +608,12 @@ _INDICATOR_FNS: Dict[str, Callable[[pd.DataFrame], float]] = {
     "donchian_low_20": lambda df: _donchian(df, 20, "low"),
     "donchian_high_55": lambda df: _donchian(df, 55, "high"),
     "donchian_low_55": lambda df: _donchian(df, 55, "low"),
+    "donchian_high_252": lambda df: _donchian(df, 252, "high"),
+    "donchian_low_252": lambda df: _donchian(df, 252, "low"),
+    # 52-week proximity + overnight gap (2026-07-22)
+    "dist_52w_high_pct": lambda df: _roll_extreme_dist(df, 252, "high"),
+    "dist_52w_low_pct": lambda df: _roll_extreme_dist(df, 252, "low"),
+    "gap_pct": _gap_pct,
     # Candle patterns
     "pattern_doji": _candle_doji,
     "pattern_hammer": _candle_hammer,

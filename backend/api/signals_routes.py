@@ -2,7 +2,6 @@
 Signals API routes — read-only views over the ``signals`` table.
 
   GET /api/signals/today         today's active+triggered signals (7d fallback)
-  GET /api/signals/intraday      last-N-minute intraday signals (Pro tier)
   GET /api/signals/{signal_id}   signal detail
   GET /api/signals/history       historical signals with filters
   GET /api/signals/performance   model_performance rollup over N days
@@ -142,45 +141,6 @@ async def get_today_signals(
     }
 
 
-@router.get("/api/signals/intraday")
-async def get_intraday_signals(
-    window_minutes: int = 60,
-    profile=Depends(_get_user_profile_dep()),
-):
-    """PR 50 — F1 intraday signals (last N-minute window, Pro tier).
-
-    Recent intraday signals (signal_type='intraday'). Fresh ones expire
-    after 1 hour — the default window matches.
-    """
-    window_minutes = max(5, min(240, int(window_minutes)))
-    cutoff = (datetime.utcnow() - timedelta(minutes=window_minutes)).isoformat()
-    supabase_query_with_retry = _get_supabase_retry()
-
-    def _fetch():
-        sb = _get_supabase_admin()
-        query = (
-            sb.table("signals")
-            .select("*")
-            .eq("signal_type", "intraday")
-            .gte("created_at", cutoff)
-            .in_("status", ["active", "triggered"])
-        )
-        is_premium = profile.get("subscription_status") in ["active", "trial"]
-        if not is_premium:
-            # Non-Pro users get an empty list + upgrade hint; tier gate
-            # at the frontend routes them to /pricing. Keep the route
-            # unauthed-friendly at the API level though (no 402 here).
-            return []
-        return query.order("created_at", desc=True).limit(50).execute().data
-
-    signals = await supabase_query_with_retry(_fetch, retries=2, timeout_fallback=[])
-    return {
-        "window_minutes": window_minutes,
-        "total": len(signals),
-        "signals": signals,
-    }
-
-
 @router.get("/api/signals/history")
 async def get_signal_history(
     from_date: Optional[str] = None,
@@ -232,7 +192,9 @@ async def get_signal_history(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        # Never leak raw DB/driver errors to the client.
+        logger.error("signal history query failed: %s", e)
+        raise HTTPException(status_code=500, detail="signal_history_unavailable")
 
 
 @router.get("/api/signals/performance")
@@ -497,18 +459,23 @@ async def get_signal(signal_id: str, profile=Depends(_get_user_profile_dep())):
         supabase = _get_supabase_admin()
         # Run the blocking supabase HTTP call off the event loop so one slow
         # query can't wedge every other request on this worker.
+        # NOTE: .limit(1) (not .single()) — .single() raises PGRST116 on a
+        # missing row, which used to turn a valid-but-unknown UUID into a
+        # 500 that leaked the raw PostgREST error. Now it's a clean 404.
         result = await asyncio.to_thread(
-            lambda: supabase.table("signals").select("*").eq("id", signal_id).single().execute()
+            lambda: supabase.table("signals").select("*").eq("id", signal_id).limit(1).execute()
         )
-        if not result.data:
+        row = (result.data or [None])[0]
+        if not row:
             raise HTTPException(status_code=404, detail="Signal not found")
         is_premium_user = profile.get("subscription_status") in ["active", "trial"]
-        if result.data.get("is_premium") and not is_premium_user:
+        if row.get("is_premium") and not is_premium_user:
             # 404 (not 403) so existence isn't leaked to free users —
             # they can't enumerate premium UUIDs by probing this route.
             raise HTTPException(status_code=404, detail="Signal not found")
-        return result.data
+        return row
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("signal detail query failed for %s: %s", signal_id, e)
+        raise HTTPException(status_code=500, detail="signal_unavailable")

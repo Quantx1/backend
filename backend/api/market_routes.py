@@ -63,34 +63,57 @@ def _cache_put(key: str, value: Any) -> Any:
     return value
 
 
-async def _stale_while_revalidate(key: str, ttl: float, producer):
+async def _stale_while_revalidate(key: str, ttl: float, producer, *, is_valid=None, retry_ttl: float = 25.0):
     """Return cached value immediately if any exists; refresh in background
     if it's beyond `ttl`. If nothing is cached, block on first compute.
+
+    Reliability hardening (so data loads accurately every time):
+      • ``is_valid(value)`` decides whether a produced value is "good" (has real
+        data). Default: not None. A transient upstream failure — e.g. yfinance
+        throttled → empty ``{"items": []}`` — is NEVER allowed to overwrite a
+        previously-good cached value.
+      • An invalid cached value (nothing good yet) is re-fetched after the short
+        ``retry_ttl`` instead of the full ``ttl``, so a cold-start blip clears in
+        seconds rather than serving empty for minutes.
     """
+    ok = is_valid or (lambda v: v is not None)
     entry = _cache_get_any(key)
     now = time.monotonic()
     if entry is None:
-        # Cold — must block. Compute + cache.
+        # Cold — must block. Compute + cache (even if invalid; the next caller
+        # retries after retry_ttl instead of stampeding upstream).
         value = await producer()
         _cache_put(key, value)
         return value
 
     cached_at, value = entry
-    if now - cached_at < ttl:
+    # Good values live for `ttl`; not-yet-good values only for `retry_ttl`.
+    age_limit = ttl if ok(value) else retry_ttl
+    if now - cached_at < age_limit:
         return value
 
-    # Stale — fire-and-forget refresh, return stale immediately.
+    # Stale — fire-and-forget refresh, return current value immediately.
     lock = _refresh_locks.setdefault(key, asyncio.Lock())
     if not lock.locked():
         async def _refresh():
             async with lock:
                 # Re-check inside lock to avoid double work.
                 fresh_entry = _cache_get_any(key)
-                if fresh_entry and time.monotonic() - fresh_entry[0] < ttl:
-                    return
+                if fresh_entry:
+                    fresh_limit = ttl if ok(fresh_entry[1]) else retry_ttl
+                    if time.monotonic() - fresh_entry[0] < fresh_limit:
+                        return
                 try:
                     new_value = await producer()
-                    _cache_put(key, new_value)
+                    if ok(new_value) or not ok(value):
+                        # Accept a good result, or any result when we had nothing
+                        # good to protect. Never overwrite good data with empty.
+                        _cache_put(key, new_value)
+                    else:
+                        # New fetch came back empty but we hold a good value:
+                        # keep it and reset its clock (serve last-good, retry
+                        # next cycle) rather than blanking the UI.
+                        _cache_put(key, value)
                 except Exception as e:
                     logger.warning("Background refresh failed for %s: %s", key, e)
         asyncio.create_task(_refresh())
@@ -280,65 +303,187 @@ async def get_market_indices(request: Request):
 
 
 # ── Global cues (pre-market research hub) ─────────────────────────────────
-# US close + Asia (live during India pre-open) + commodities + DXY + US 10Y +
-# BTC. Public; yfinance (Tier-3 source); 5-min stale-while-revalidate. On any
-# failure we return an empty list — honest, never faked.
+# GIFT Nifty (gap-direction proxy) + US close + Asia (live during India
+# pre-open) + commodities + DXY + US 10Y + BTC. All FOREIGN / non-NSE feeds,
+# so SAFE to show to everyone (not licence-gated NSE market data). Public;
+# yfinance (Tier-3 source); 5-min stale-while-revalidate. On any failure a
+# given item is honest-skipped (null last dropped) — never faked.
+#
+# NOTE (SEBI): every ticker here is a foreign / global instrument. We never
+# use ^NSEI (NIFTY 50 spot) as a GIFT proxy — that is a gated NSE index level.
+# GIFT Nifty has no reliable free yfinance symbol; when unavailable it is
+# honest-skipped rather than substituted.
 _GLOBAL_TICKERS = [
-    ("sp500", "^GSPC", "S&P 500"),
-    ("nasdaq", "^IXIC", "Nasdaq"),
-    ("dow", "^DJI", "Dow Jones"),
-    ("nikkei", "^N225", "Nikkei 225"),
-    ("hangseng", "^HSI", "Hang Seng"),
-    ("crude", "BZ=F", "Brent crude"),
-    ("gold", "GC=F", "Gold"),
-    ("dxy", "DX-Y.NYB", "Dollar index"),
-    ("us10y", "^TNX", "US 10Y"),
-    ("btc", "BTC-USD", "Bitcoin"),
+    ("giftnifty", ["GIFTNIFTY", "NIFTY_F1"], "GIFT NIFTY"),
+    ("sp500", ["^GSPC"], "S&P 500"),
+    ("nasdaq", ["^IXIC"], "Nasdaq"),
+    ("dow", ["^DJI"], "Dow Jones"),
+    ("nikkei", ["^N225"], "Nikkei 225"),
+    ("hangseng", ["^HSI"], "Hang Seng"),
+    ("crude", ["BZ=F"], "Brent crude"),
+    ("gold", ["GC=F"], "Gold"),
+    ("dxy", ["DX-Y.NYB", "DX=F"], "Dollar index"),
+    ("us10y", ["^TNX"], "US 10Y"),
+    ("btc", ["BTC-USD"], "Bitcoin"),
 ]
 
 
+def _closes_from(df, sym):
+    """Extract a clean Close series for ``sym`` from a yfinance frame that may
+    be single- or multi-indexed. Returns (last, prev) or (None, None)."""
+    try:
+        if df is None or len(df) == 0:
+            return None, None
+        if hasattr(df.columns, "levels"):          # multi-ticker frame
+            closes = df[sym]["Close"].dropna()
+        else:                                        # single-ticker frame
+            closes = df["Close"].dropna()
+        if len(closes) >= 2:
+            return float(closes.iloc[-1]), float(closes.iloc[-2])
+        if len(closes) == 1:
+            return float(closes.iloc[-1]), None
+    except Exception:
+        pass
+    return None, None
+
+
 def _fetch_global_cues() -> Dict[str, Any]:
+    """Best-effort global cues. One batch yfinance download, then a per-ticker
+    retry for anything that came back empty (batch group_by is flaky across
+    yfinance versions). Honest-skip null items."""
     items: list[dict[str, Any]] = []
     try:
         import yfinance as yf
+    except Exception as e:  # yfinance unavailable — honest-empty
+        logger.warning("Global cues: yfinance import failed: %s", e)
+        return {"items": items, "source": "yfinance"}
 
-        syms = [t[1] for t in _GLOBAL_TICKERS]
-        df = yf.download(
-            " ".join(syms), period="5d", interval="1d",
+    # First symbol per key is the primary; keep the flat batch list.
+    primary = {key: syms[0] for key, syms, _ in _GLOBAL_TICKERS}
+    batch = None
+    try:
+        batch = yf.download(
+            " ".join(primary.values()), period="5d", interval="1d",
             progress=False, group_by="ticker", threads=True,
         )
-        for key, sym, label in _GLOBAL_TICKERS:
-            last = prev = None
-            try:
-                closes = df[sym]["Close"].dropna()
-                if len(closes) >= 2:
-                    last, prev = float(closes.iloc[-1]), float(closes.iloc[-2])
-                elif len(closes) == 1:
-                    last = float(closes.iloc[-1])
-            except Exception:
-                pass
-            chg = round((last - prev) / prev * 100, 2) if (last is not None and prev) else None
-            items.append({
-                "key": key, "label": label,
-                "last": round(last, 2) if last is not None else None,
-                "change_pct": chg,
-            })
-    except Exception as e:  # network / yfinance failure — return empty, never faked
-        logger.warning(f"Global cues fetch failed: {e}")
+    except Exception as e:
+        logger.debug("Global cues batch download failed (will per-ticker): %s", e)
+
+    for key, syms, label in _GLOBAL_TICKERS:
+        last = prev = None
+        # Try each candidate symbol until one yields a close.
+        for sym in syms:
+            if batch is not None and sym == primary[key]:
+                last, prev = _closes_from(batch, sym)
+            if last is None:
+                try:
+                    hist = yf.Ticker(sym).history(period="5d")
+                    last, prev = _closes_from(hist, sym)
+                except Exception:
+                    last, prev = None, None
+            if last is not None:
+                break
+        if last is None:
+            continue  # honest-skip: no real value for this item
+        chg = round((last - prev) / prev * 100, 2) if prev else None
+        items.append({
+            "key": key, "label": label,
+            "last": round(last, 2),
+            "change_pct": chg,
+        })
     return {"items": items, "source": "yfinance"}
 
 
 @router.get("/api/market/global")
 async def get_global_cues():
-    """Global pre-market cues (US / Asia / commodities / DXY / US 10Y / BTC).
+    """Global pre-market cues (GIFT Nifty / US / Asia / commodities / DXY /
+    US 10Y / BTC).
 
-    Public (no auth) — backs the Markets research hub. yfinance; 5-minute
+    Public (no auth) — backs the Markets research hub + Daily Briefing. All
+    foreign / global instruments (SAFE, non-NSE). yfinance; 5-minute
     stale-while-revalidate so only the first request after boot pays the cost.
+
+    Item shape: ``{key, label, last, change_pct}``; null items are skipped.
     """
     async def _produce():
         return await asyncio.to_thread(_fetch_global_cues)
 
-    return await _stale_while_revalidate("global_cues", ttl=300.0, producer=_produce)
+    return await _stale_while_revalidate(
+        "global_cues", ttl=300.0, producer=_produce,
+        is_valid=lambda v: bool(v and v.get("items")),
+    )
+
+
+@router.get("/api/market/deals")
+async def get_big_deals():
+    """Big bulk/block deals (by ₹ value, last few sessions) + upcoming
+    corporate actions for F&O names. Public (no auth) — these are NSE's own
+    EOD-PUBLISHED disclosure reports (same SEBI lane as /fii-dii), labelled
+    as such. 1h service cache + stale-while-revalidate."""
+    async def _produce():
+        from ..services.market.deals import big_deals
+        return await asyncio.to_thread(big_deals)
+
+    return await _stale_while_revalidate(
+        "big_deals", ttl=1800.0, producer=_produce,
+        is_valid=lambda v: bool(v and (v.get("deals") or v.get("corporate_actions"))),
+    )
+
+
+@router.get("/api/market/fii-dii")
+async def get_fii_dii_eod():
+    """FII/DII EOD daily net (cash) + a short trailing trend. Public (no auth).
+
+    These are EOD-published market statistics (net figures NSE/SEBI publish
+    after the close, shown on every finance site) — NOT a real-time intraday
+    feed. Served to EVERYONE, labelled ``provisional``. Values in ₹ Cr.
+
+    SEBI note: a SEBI-registered professional should confirm the
+    EOD-published-statistics classification before paid / public launch. This
+    endpoint never exposes intraday NSE quotes.
+
+    Shape: ``{date, provisional, fii:{cash_net, fno_net}, dii:{cash_net},
+    trend:[{date, fii_cash, dii_cash}], source}``. Cached 5-min.
+    """
+    async def _produce():
+        from ..services.briefing.market_briefing import fii_dii_eod
+        return await asyncio.to_thread(fii_dii_eod, 5)
+
+    return await _stale_while_revalidate(
+        "fii_dii_eod", ttl=300.0, producer=_produce,
+        is_valid=lambda v: bool(v and ((v.get("fii") or {}).get("cash_net") is not None or v.get("trend"))),
+    )
+
+
+@router.get("/api/market/briefing")
+async def get_market_briefing(session: str = Query("auto", description="auto | premarket | postmarket")):
+    """AI Daily Market Briefing — pre-market read + post-market wrap.
+
+    Public (no auth) — built ENTIRELY from SAFE data (global overnight cues +
+    EOD/derived India context + FII/DII EOD statistics + calendar events) plus
+    one cached daily LLM narrative. Shows to everyone; never leaks real-time
+    intraday NSE quotes.
+
+    ``session=auto`` resolves premarket / intraday / postmarket from the clock
+    (IST). Generated once per (trading-date, session) and shared via the daily
+    LLM cache — first visitor triggers, everyone else shares it.
+    """
+    from ..services.briefing.market_briefing import build_briefing, current_session
+
+    sess = session if session in ("premarket", "postmarket") else current_session()
+    cache_key = f"briefing:{sess}:{date.today().isoformat()}"
+
+    async def _produce():
+        return await asyncio.to_thread(build_briefing, sess)
+
+    # Short TTL: the LLM narrative itself is day-cached inside build_briefing;
+    # this in-process cache just spares repeat fact-assembly within a few min.
+    # A briefing is only "good" once it carries a headline (the deterministic
+    # core) — so a rare failed assembly never gets cached over a real one.
+    return await _stale_while_revalidate(
+        cache_key, ttl=180.0, producer=_produce,
+        is_valid=lambda v: bool(v and v.get("headline")),
+    )
 
 
 @router.get("/api/market/news")

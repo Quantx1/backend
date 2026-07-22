@@ -63,6 +63,22 @@ _OSCILLATORS: tuple[tuple[str, float, float], ...] = (
     ("mfi", 15, 85),
     ("cci", -200, 200),
     ("roc_10", -10, 10),
+    ("roc_20", -15, 15),          # 2026-07-22 — slower drop clock
+)
+
+# Drop indicators for the panic-reversion family (2026-07-22). These
+# are the entry signals of the gate-verified winners: buy a hard
+# short-term drop, exit on an asymmetric oscillator recovery. The GA
+# explores this region densely because it is the ONLY equity family
+# that has passed the product's out-of-sample gate net of costs.
+_DROP_ENTRIES: tuple[tuple[str, float, float], ...] = (
+    ("roc_10", -10, -3),         # 3-10% drop over 10 sessions
+    ("roc_20", -15, -5),         # 5-15% slide over 20 sessions
+    ("williams_r", -95, -70),    # deep Williams washout
+    ("rsi7", 15, 35),            # fast-RSI panic
+    ("stochastic_k", 10, 35),    # stochastic washout
+    ("mfi", 10, 28),             # money-flow capitulation
+    ("cci", -220, -110),         # statistical washout
 )
 
 # Trend-following moving averages
@@ -106,6 +122,61 @@ def _mean_reversion_long_entry(rng: random.Random) -> Condition:
             children=[osc_leaf, regime_leaf],
         )
     return osc_leaf
+
+
+def _panic_reversion_entry(rng: random.Random) -> Condition:
+    """Buy a hard short-term drop / oscillator washout — the gate-verified
+    family. Optionally AND with an uptrend filter so we buy dips in
+    leaders, not breakdowns in laggards."""
+    ind, lo, hi = rng.choice(_DROP_ENTRIES)
+    threshold = round(rng.uniform(lo, hi), 2)
+    drop_leaf = Condition(
+        kind=ConditionKind.INDICATOR_COMPARE,
+        indicator=ind,
+        op=Operator.LT,
+        value=threshold,
+    )
+    r = rng.random()
+    if r < 0.30:
+        # AND above the 200-SMA: dip in an uptrend
+        trend_leaf = Condition(
+            kind=ConditionKind.INDICATOR_CROSS,
+            indicator="close",
+            op=Operator.CROSSES_ABOVE,
+            value="prev_close",
+        )
+        return Condition(kind=ConditionKind.COMPOSITE_AND, children=[drop_leaf, trend_leaf])
+    if r < 0.45:
+        # AND with a medium-term uptrend (roc_126 > 0): leaders only
+        mom_leaf = Condition(
+            kind=ConditionKind.INDICATOR_COMPARE,
+            indicator="roc_126",
+            op=Operator.GT,
+            value=round(rng.uniform(0, 10), 1),
+        )
+        return Condition(kind=ConditionKind.COMPOSITE_AND, children=[drop_leaf, mom_leaf])
+    return drop_leaf
+
+
+def _panic_reversion_exit(rng: random.Random) -> Condition:
+    """Asymmetric recovery exit for the panic family: leave on an
+    oscillator recovery through an overbought/neutral level (the
+    verified winners exit on rsi14 > 65-88 regardless of entry clock)."""
+    exit_ind = rng.choice(["rsi14", "rsi7", "williams_r", "stochastic_k"])
+    if exit_ind == "williams_r":
+        val = round(rng.uniform(-40, -15), 1)
+    elif exit_ind == "stochastic_k":
+        val = round(rng.uniform(60, 85), 1)
+    elif exit_ind == "rsi7":
+        val = round(rng.uniform(70, 85), 1)
+    else:  # rsi14
+        val = round(rng.uniform(62, 80), 1)
+    return Condition(
+        kind=ConditionKind.INDICATOR_COMPARE,
+        indicator=exit_ind,
+        op=Operator.GT,
+        value=val,
+    )
 
 
 def _momentum_long_entry(rng: random.Random) -> Condition:
@@ -220,19 +291,34 @@ class EquitySearchSpace:
         """Draw a single fully-validated `Strategy` candidate."""
         rng = self._rng(idx)
 
-        # Entry — pick one of three families
-        entry_family = rng.choice(["mean_reversion", "momentum", "sentiment"])
-        if entry_family == "mean_reversion":
+        # Entry — the panic-reversion family is weighted heavily because
+        # it is the only equity family that has passed the OOS gate net
+        # of costs; the other three stay in the draw for diversity.
+        entry_family = rng.choices(
+            ["panic_reversion", "mean_reversion", "momentum", "sentiment"],
+            weights=[0.55, 0.20, 0.15, 0.10],
+        )[0]
+        if entry_family == "panic_reversion":
+            entry = _panic_reversion_entry(rng)
+            exit_cond = _panic_reversion_exit(rng)
+        elif entry_family == "mean_reversion":
             entry = _mean_reversion_long_entry(rng)
+            exit_cond = _build_exit(rng, entry)
         elif entry_family == "momentum":
             entry = _momentum_long_entry(rng)
+            exit_cond = _build_exit(rng, entry)
         else:
             entry = _sentiment_tilt_entry(rng)
+            exit_cond = _build_exit(rng, entry)
 
-        exit_cond = _build_exit(rng, entry)
-
-        # Stop / target / trailing — wider for position horizon
-        if self.horizon == "swing":
+        # Stop / target / trailing. The panic family uses the wider
+        # stops + asymmetric targets the verified winners run (SL 5-10%,
+        # TP 12-27%); the other families keep the original ranges.
+        if entry_family == "panic_reversion":
+            sl = round(rng.uniform(5.0, 10.0), 2)
+            tp = round(rng.uniform(12.0, 27.0), 2)
+            trail = round(rng.uniform(1.5, 6.0), 2) if rng.random() < 0.4 else None
+        elif self.horizon == "swing":
             sl = round(rng.uniform(1.5, 4.0), 2)
             tp = round(rng.uniform(3.0, 10.0), 2)
             trail = round(rng.uniform(1.5, 3.5), 2) if rng.random() < 0.4 else None
@@ -253,6 +339,7 @@ class EquitySearchSpace:
 
         # Build human-readable name
         family_label = {
+            "panic_reversion": "Panic",
             "mean_reversion": "MeanRev",
             "momentum": "Momentum",
             "sentiment": "Sentiment",
@@ -272,7 +359,10 @@ class EquitySearchSpace:
             trailing_stop_pct=trail,
             position_size=sizing,
             regime_filter=regime,
-            lookback_days=180 if self.horizon == "swing" else 365,
+            lookback_days=(
+                365 if entry_family == "panic_reversion"
+                else (180 if self.horizon == "swing" else 365)
+            ),
             mode=StrategyMode.BACKTEST,
         )
 

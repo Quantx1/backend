@@ -240,6 +240,7 @@ INDICATOR_REGISTRY: tuple[str, ...] = (
     "mfi",
     "cci",
     "roc_10", "roc_20",                       # PR-FEATURES — rate-of-change momentum
+    "roc_63", "roc_126",                      # 2026-07-22 — quarterly/half-year momentum
     # Trend
     "ema5", "ema8", "ema13", "ema21", "ema50", "ema100", "ema200",
     "sma10", "sma20", "sma50", "sma100", "sma200",
@@ -273,6 +274,9 @@ INDICATOR_REGISTRY: tuple[str, ...] = (
     "pivot_point", "pivot_r1", "pivot_s1", "pivot_r2", "pivot_s2", "pivot_r3", "pivot_s3",
     # Donchian channel (prior-N-bar extremes — turtle breakouts)
     "donchian_high_20", "donchian_low_20", "donchian_high_55", "donchian_low_55",
+    "donchian_high_252", "donchian_low_252",  # 2026-07-22 — 52-week extremes
+    # 52-week-high/low proximity + overnight gap (2026-07-22)
+    "dist_52w_high_pct", "dist_52w_low_pct", "gap_pct",
     # Candle patterns (boolean — value 1=present, 0=absent)
     "pattern_doji", "pattern_hammer", "pattern_inverted_hammer",
     "pattern_bullish_engulfing", "pattern_bearish_engulfing",

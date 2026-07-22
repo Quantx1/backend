@@ -46,8 +46,46 @@ def _closes(symbol: str, period: str = "6mo") -> List[float]:
         return []
 
 
+def _ratio_series(stock: Sequence[float], bench: Sequence[float], points: int = 120) -> List[float]:
+    """RS line: stock/bench price ratio over the last `points` sessions,
+    rebased to 100 at the window start (the classic Mansfield-style read —
+    rising = outperforming NIFTY, regardless of absolute direction)."""
+    n = min(len(stock), len(bench), points)
+    if n < 10:
+        return []
+    s, b = stock[-n:], bench[-n:]
+    if not s[0] or not b[0]:
+        return []
+    base = s[0] / b[0]
+    return [round((si / bi) / base * 100, 2) for si, bi in zip(s, b) if bi]
+
+
+def _outperf_streak(stock: Sequence[float], bench: Sequence[float]) -> Optional[int]:
+    """Consecutive sessions the 20d RS has been positive (negative → negated).
+    None when history is too short."""
+    n = min(len(stock), len(bench))
+    if n < 40:
+        return None
+    streak = 0
+    sign = None
+    for i in range(n - 1, 20, -1):
+        rel = compute_rel_return(stock[: i + 1], bench[: i + 1], 20)
+        if rel is None:
+            break
+        cur = rel > 0
+        if sign is None:
+            sign = cur
+        if cur != sign:
+            break
+        streak += 1
+        if streak >= 60:
+            break
+    return streak if sign else -streak if streak else 0
+
+
 def symbol_rs(symbol: str, *, benchmark: str = "NIFTY") -> Dict:
-    """Multi-window RS vs the benchmark for one symbol (cached 30m)."""
+    """Multi-window RS vs the benchmark for one symbol (cached 30m), plus the
+    RS ratio line (rebased 100) and the 20d-RS streak for the full card."""
     sym = symbol.strip().upper()
     hit = _CACHE.get(sym)
     if hit and (time.monotonic() - hit[0]) < _TTL_S:
@@ -57,7 +95,12 @@ def symbol_rs(symbol: str, *, benchmark: str = "NIFTY") -> Dict:
     rs = {f"rs_{w}d": compute_rel_return(stock, bench, w) for w in _WINDOWS}
     rs["benchmark"] = benchmark
     rs["outperforming"] = bool((rs.get("rs_50d") or 0) > 0)
-    out = {"symbol": sym, **rs}
+    out = {
+        "symbol": sym,
+        **rs,
+        "ratio_line": _ratio_series(stock, bench),
+        "streak_20d": _outperf_streak(stock, bench),
+    }
     if stock and bench:
         _CACHE[sym] = (time.monotonic(), out)
     return out

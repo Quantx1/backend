@@ -362,6 +362,17 @@ class SchedulerService:
             name="Style Engines Daily Scoring (Phase 2)",
         )
 
+        # Signal lifecycle — 16:15 IST (after the 15:55 book refresh): every
+        # open signal either fills, hits stop/target, or ages toward its
+        # valid_until expiry against the day's settled bar. Signals decay —
+        # they never sit "active" forever.
+        self.scheduler.add_job(
+            self.run_signal_lifecycle,
+            CronTrigger(hour=16, minute=15, day_of_week="mon-fri"),
+            id="signal_lifecycle",
+            name="Signal Lifecycle Evaluation",
+        )
+
         # Paper window — 23:30 IST nightly outcome maturation: computes
         # H-bar forward returns vs the equal-weight universe for persisted
         # style_signals books once H trading bars have elapsed. Guarded by
@@ -663,6 +674,42 @@ class SchedulerService:
             name="FII/DII Daily Catch-up (NSE live API)",
         )
 
+        # Daily Briefing pre-warm — 08:00 IST premarket read, 16:00 IST
+        # postmarket wrap (Mon-Fri). Warms the shared daily-cache LLM narrative
+        # before traders arrive so the first visitor doesn't pay the latency.
+        # Non-fatal; on-demand generation covers any miss.
+        self.scheduler.add_job(
+            self.prewarm_briefing,
+            CronTrigger(hour=8, minute=0, day_of_week="mon-fri"),
+            args=["premarket"],
+            id="briefing_prewarm_premarket",
+            name="Daily Briefing Pre-warm (premarket)",
+            replace_existing=True,
+        )
+        self.scheduler.add_job(
+            self.prewarm_briefing,
+            CronTrigger(hour=16, minute=0, day_of_week="mon-fri"),
+            args=["postmarket"],
+            id="briefing_prewarm_postmarket",
+            name="Daily Briefing Pre-warm (postmarket)",
+            replace_existing=True,
+        )
+
+        # Screener/sector-cache warm — every 12 min across the active window
+        # (07:00–18:59 IST, Mon-Fri) so the 500-symbol indicator table is always
+        # < 15 min old (its cache TTL). Keeps the sector-heatmap / power-screeners
+        # serving from cache in ~30ms instead of paying a cold 25s recompute that
+        # times out to 503. Off-thread + non-fatal; startup pre-warm covers boot.
+        self.scheduler.add_job(
+            self.prewarm_screener,
+            CronTrigger(minute="*/12", hour="7-18", day_of_week="mon-fri"),
+            id="screener_cache_prewarm",
+            name="Screener/sector cache warm (12-min)",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+
         # 23:00 IST daily — paper portfolio snapshot powering /paper-trading
         # equity curve + league leaderboard (F11 / N6).
         self.scheduler.add_job(
@@ -930,6 +977,33 @@ class SchedulerService:
                     str(e)
                 )
 
+    async def prewarm_briefing(self, session: str = "premarket"):
+        """Pre-generate + cache the AI Daily Briefing (08:00 premarket /
+        16:00 postmarket IST) so the first visitor shares a warm cache instead
+        of paying LLM latency. Non-fatal — on-demand generation covers a miss.
+        """
+        logger.info("Pre-warming Daily Briefing (%s)...", session)
+        try:
+            if not await is_trading_day():
+                logger.info("Not a trading day, skipping briefing pre-warm")
+                return
+            from ..services.briefing.market_briefing import build_briefing
+            await asyncio.to_thread(build_briefing, session)
+            logger.info("Daily Briefing pre-warmed (%s)", session)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Briefing pre-warm (%s) failed (non-fatal): %s", session, e)
+
+    async def prewarm_screener(self):
+        """Keep the LiveScreener computed table warm so the sector-heatmap /
+        power-screeners always serve from cache (fast) instead of paying a cold
+        25s recompute that times out to 503. Off-thread + non-fatal."""
+        try:
+            from ..data.screener.engine import get_live_screener
+            await asyncio.to_thread(get_live_screener()._get_computed_data)
+            logger.info("Screener/sector cache warmed (scheduler)")
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Screener cache warm failed (non-fatal): %s", e)
+
     async def refresh_kite_admin_token(self):
         """
         6:05 AM - Auto-refresh Kite admin access token (expires daily at 6 AM IST).
@@ -1080,6 +1154,54 @@ class SchedulerService:
                 logger.info("Not a trading day, skipping regime update")
                 status = "skipped"
                 return
+
+            # ── PRIMARY PATH (2026-07-21): the 3-model ensemble over our own
+            # candle store (services/regime/refresh). Self-contained — no model
+            # artifact download, no live provider fetch — and idempotent, so it
+            # also heals any gap since the last successful run. The legacy
+            # single-HMM artifact path below survives only as a fallback.
+            try:
+                from ..services.regime.refresh import refresh_regime_history
+
+                prior_row = None
+                try:
+                    prior = (
+                        self.supabase.table("regime_history")
+                        .select("regime")
+                        .order("detected_at", desc=True)
+                        .limit(1)
+                        .execute()
+                    )
+                    prior_row = (prior.data or [{}])[0].get("regime")
+                except Exception:
+                    pass
+
+                summary = await asyncio.to_thread(refresh_regime_history, 30)
+                cur = summary.get("current")
+                if cur:
+                    if prior_row and prior_row != cur["regime"]:
+                        try:
+                            from .events import MessageType, emit_event
+                            await emit_event(
+                                MessageType.REGIME_CHANGE,
+                                {
+                                    "old_regime": prior_row,
+                                    "new_regime": cur["regime"],
+                                    "confidence": cur.get("confidence", 0.0),
+                                    "detected_at": datetime.utcnow().isoformat(),
+                                },
+                            )
+                            logger.info("REGIME_CHANGE emitted: %s → %s", prior_row, cur["regime"])
+                        except Exception as emit_err:
+                            logger.debug("REGIME_CHANGE emit skipped: %s", emit_err)
+                    logger.info(
+                        "Regime saved via ensemble: %s (+%s rows healed)",
+                        cur["regime"], summary.get("inserted"),
+                    )
+                    return
+                logger.warning("Ensemble regime refresh returned no current — falling back to legacy HMM path")
+            except Exception as ens_err:
+                logger.warning("Ensemble regime refresh failed (%s) — falling back to legacy HMM path", ens_err)
 
             from ml.regime_detector import MarketRegimeDetector, compute_regime_features
             try:
@@ -1567,6 +1689,21 @@ class SchedulerService:
                 logger.debug("momentum email failed for %s: %s", email, exc)
         logger.info("Momentum email: sent=%d", sent)
 
+    async def run_signal_lifecycle(self):
+        """16:15 IST — transition every open signal against the day's settled
+        bar (fill / stop / target / expiry). Idempotent; best-effort."""
+        started_at = datetime.utcnow()
+        try:
+            from ..services.signals.lifecycle import evaluate_signal_lifecycle
+            counts = await asyncio.to_thread(evaluate_signal_lifecycle, self.supabase)
+            self._write_job_run(
+                "signal_lifecycle", started_at, status="success",
+                items_processed=counts.get("checked", 0))
+        except Exception as exc:  # noqa: BLE001 — never crash the loop
+            logger.error("signal lifecycle job failed: %s", exc)
+            self._write_job_run(
+                "signal_lifecycle", started_at, status="failed", error=str(exc))
+
     async def generate_style_signals(self):
         """15:55 IST — score every LIVE style engine (``STYLE_ENGINES``) and
         persist a daily JSON snapshot per engine (Phase 2 deploy plumbing).
@@ -1637,6 +1774,17 @@ class SchedulerService:
                     logger.info("style signals %s: persisted %d table rows", name, written)
                 except Exception as exc:  # noqa: BLE001 — DB write never blocks the cron
                     logger.error("style signal table write failed for %s: %s", name, exc)
+                # Bridge the same book into the LEGACY `signals` table so the
+                # signals page / detail / debate / history surfaces stay live
+                # (they read public.signals, which the retired v1 pipeline
+                # stopped feeding on 2026-05-29). Best-effort by contract.
+                try:
+                    from ..ai.signals.style_persistence import sync_signals_table  # noqa: PLC0415
+                    bridged = sync_signals_table(
+                        name, date.today(), sigs, supabase=self.supabase)
+                    logger.info("style signals %s: bridged %d rows into signals table", name, bridged)
+                except Exception as exc:  # noqa: BLE001 — DB write never blocks the cron
+                    logger.error("signals-table bridge failed for %s: %s", name, exc)
             except Exception as exc:  # noqa: BLE001 — isolate per engine
                 failures.append(f"{name}: {exc}")
                 logger.error("style signal scoring failed for %s: %s", name, exc)

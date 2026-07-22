@@ -89,9 +89,9 @@ class TestNewIndicators:
         assert is_last == 1.0
 
     def test_registry_size(self):
-        """Confirm registry size (51 → 68 PR-FEATURES → 79 with pivots+Donchian)."""
+        """Confirm registry size (51 → 68 PR-FEATURES → 79 pivots+Donchian → 86 52w/gap/roc)."""
         from backend.ai.strategy.dsl import INDICATOR_REGISTRY
-        assert len(INDICATOR_REGISTRY) == 79
+        assert len(INDICATOR_REGISTRY) == 86
         # Spot-check new ones are in the registry
         for new_name in ("roc_10", "stoch_rsi_k", "di_plus", "di_minus",
                           "volatility_20", "volatility_regime", "obv_slope",

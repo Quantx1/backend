@@ -122,6 +122,107 @@ def save_style_signals(
         return 0
 
 
+# Calendar-day validity per engine — horizon TRADING bars padded to calendar
+# (momentum 20 bars ≈ 4 weeks, swing 10 bars ≈ 2 weeks).
+_VALID_CALENDAR_DAYS = {"momentum": 30, "swing": 16}
+
+# Top-N of each book that Free-tier users can see (rest is_premium).
+_FREE_TOP_N = 3
+
+
+def sync_signals_table(
+    engine: str,
+    trade_date: Any,
+    signals: List[Any],
+    supabase: Any = None,
+) -> int:
+    """Bridge the day's style-engine book into the LEGACY ``signals`` table.
+
+    The signals PAGE (and its detail view, Counterpoint debate, history,
+    alerts) reads ``public.signals`` — which stopped receiving rows when the
+    v1 ensemble pipeline was retired (last write 2026-05-29). This bridge
+    keeps that whole surface alive with the REAL v2 engine output: the same
+    book that goes to ``style_signals`` / the JSON snapshot, mapped onto the
+    legacy schema. No fabrication — every number is engine output.
+
+    Semantics: a daily book. Writing today's book (a) expires this engine's
+    previous active rows, (b) deletes any same-day rows (idempotent rerun),
+    (c) inserts the fresh book (status=active, valid_until = trade_date +
+    calendar padding of the engine horizon). Best-effort by contract: logs
+    and returns 0 on failure, never raises into the cron.
+    """
+    try:
+        t_iso = _iso(trade_date)
+        now_iso = datetime.utcnow().isoformat()
+        valid_days = _VALID_CALENDAR_DAYS.get(engine, 21)
+        valid_until = (_to_date(trade_date) + timedelta(days=valid_days)).isoformat()
+
+        # Regime context — best-effort enrichment for the detail page.
+        regime = None
+        try:
+            from backend.services.regime.refresh import current_regime  # noqa: PLC0415
+            regime = (current_regime() or {}).get("regime")
+        except Exception:  # noqa: BLE001
+            pass
+
+        rows = []
+        for s in signals:
+            d = s.to_dict() if hasattr(s, "to_dict") else dict(s)
+            rank = int(d.get("rank") or 0)
+            direction = "LONG" if (d.get("direction") or "BUY").upper() in ("BUY", "LONG") else "SHORT"
+            exp_ret = float(d.get("expected_return") or 0.0)
+            pctile = float(d.get("percentile") or 0.0)
+            reasons = list(d.get("reasons") or [])
+            reasons.insert(0, f"{engine.capitalize()} engine rank #{rank} ({pctile:.0f}th percentile of the universe)")
+            explanation = (
+                f"{engine.capitalize()} engine ranked {d['symbol']} #{rank} in its "
+                f"universe ({pctile:.0f}th percentile) with an expected "
+                f"{'{:+.1f}'.format(exp_ret * 100)}% move over the model horizon. "
+                f"Entry/stop/target come from the ATR risk engine "
+                f"(risk:reward {float(d.get('risk_reward') or 0):.1f}). "
+                "Analysis from a walk-forward-validated model — not investment advice."
+            )
+            rows.append({
+                "symbol": d["symbol"],
+                "date": t_iso,
+                "signal_type": engine,
+                "segment": "EQUITY",
+                "exchange": "NSE",
+                "direction": direction,
+                "entry_price": float(d.get("entry_price") or 0.0),
+                "stop_loss": float(d.get("stop_loss") or 0.0),
+                "target_1": float(d.get("target") or 0.0),
+                "risk_reward": float(d.get("risk_reward") or 0.0),
+                "confidence": float(d.get("confidence") or 0.0),
+                "expected_return": exp_ret,
+                "status": "active",
+                "valid_from": now_iso,
+                "valid_until": valid_until,
+                "generated_at": now_iso,
+                "is_premium": rank > _FREE_TOP_N,
+                "reasons": reasons,
+                "explanation_text": explanation,
+                "regime_at_signal": regime,
+            })
+        if not rows:
+            return 0
+
+        sb = _client(supabase)
+        # (a) expire this engine's previous active book(s)
+        sb.table("signals").update({"status": "expired"}) \
+            .eq("signal_type", engine).in_("status", ["active", "triggered"]) \
+            .lt("date", t_iso).execute()
+        # (b) idempotent same-day rerun
+        sb.table("signals").delete() \
+            .eq("signal_type", engine).eq("date", t_iso).execute()
+        # (c) fresh book
+        sb.table("signals").insert(rows).execute()
+        return len(rows)
+    except Exception as exc:  # noqa: BLE001 — best-effort by contract
+        logger.warning("sync_signals_table(%s) failed: %s", engine, exc)
+        return 0
+
+
 def save_style_outcomes(rows: List[dict], supabase: Any = None) -> int:
     """Upsert matured outcome rows into ``style_signal_outcomes``.
 

@@ -467,8 +467,18 @@ class MarketDataProvider:
 
     def get_depth(self, symbol: str):
         """Live L2 order-book depth (MarketDepth) via the admin Kite provider.
-        Honest-None when no live feed is available (no fabrication)."""
-        return self._get_kite_provider().get_depth(symbol)
+        Honest-None when no live feed is available (no fabrication). The Kite
+        accessor can fall back to YFinance when Kite isn't configured — that
+        provider has no depth feed, so guard instead of AttributeError-500ing
+        the route (the stock page's order-book card polls this)."""
+        provider = self._get_kite_provider()
+        if not hasattr(provider, "get_depth"):
+            return None
+        try:
+            return provider.get_depth(symbol)
+        except Exception as e:  # noqa: BLE001
+            logger.debug("get_depth failed for %s: %s", symbol, e)
+            return None
 
     async def get_depth_async(self, symbol: str):
         """Async wrapper for get_depth."""

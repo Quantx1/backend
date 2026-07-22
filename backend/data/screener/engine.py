@@ -22,6 +22,7 @@ from .filters import (
 from ml.features.indicators import compute_all_indicators
 import logging
 import sys
+import threading
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -329,8 +330,16 @@ class LiveScreenerEngine:
         self._computed_cache: Optional[Tuple[pd.DataFrame, Dict[str, pd.DataFrame], datetime]] = None
         self._scanner_cache: Dict[str, Tuple[Dict, datetime]] = {}
         self._nifty_cache: Optional[Tuple[Dict, datetime]] = None
+        # Single-flight lock: serialise the slow 500-symbol recompute so a startup
+        # warm + scheduler warm + concurrent user requests don't each fire their
+        # own yfinance batch (which thrashed the rate limit → 503s + partial data).
+        self._compute_lock = threading.Lock()
 
-        self.CACHE_TTL = timedelta(minutes=5)
+        # 15 min (was 5) — sector/indicator aggregates don't move fast, and a
+        # shorter TTL meant the cache went cold constantly, triggering the slow
+        # 500-symbol recompute on user requests → the flaky sector-heatmap 503s.
+        # Paired with stale-while-revalidate in _computed_data_or_503.
+        self.CACHE_TTL = timedelta(minutes=15)
         self.UNIVERSE_CACHE_TTL = timedelta(hours=1)
         self.BATCH_SIZE = 200
         self.MIN_TRADING_DAYS = 20
@@ -428,34 +437,44 @@ class LiveScreenerEngine:
         Uses Kite Connect + jugaad-data for market data.
         Returns (summary_df, per_symbol_dfs), cached for 5 minutes.
         """
+        # Fast path — a fresh cache needs no lock.
         if self._computed_cache:
             summary_df, per_symbol_dfs, cached_at = self._computed_cache
             if datetime.now() - cached_at < self.CACHE_TTL and not summary_df.empty:
                 return summary_df, per_symbol_dfs
 
-        symbols = self._get_universe()
-        if not symbols:
-            return pd.DataFrame(), {}
+        # Single-flight: ONE thread does the slow recompute; concurrent callers
+        # block here and then return the fresh cache the first writer produced.
+        with self._compute_lock:
+            # Double-check inside the lock — another thread may have just filled it.
+            if self._computed_cache:
+                summary_df, per_symbol_dfs, cached_at = self._computed_cache
+                if datetime.now() - cached_at < self.CACHE_TTL and not summary_df.empty:
+                    return summary_df, per_symbol_dfs
 
-        # PR-S2.1 — keep the legacy bulk pipeline at 500 symbols (its
-        # synchronous fetch blocks startup pre-warm when bigger). The
-        # full 2,136-symbol NSE universe is served by the streaming
-        # /patterns/v2/scan/stream endpoint instead, which fans out in
-        # batches without blocking. The 50+ technical screeners stay
-        # on largecaps-only via this cap.
-        symbols = symbols[:500]
+            symbols = self._get_universe()
+            if not symbols:
+                return pd.DataFrame(), {}
 
-        # Fetch via Kite admin + jugaad-data
-        per_symbol_dfs, summary_rows = self._fetch_via_kite(symbols)
+            # PR-S2.1 — keep the legacy bulk pipeline at 500 symbols (its
+            # synchronous fetch blocks startup pre-warm when bigger). The
+            # full 2,136-symbol NSE universe is served by the streaming
+            # /patterns/v2/scan/stream endpoint instead, which fans out in
+            # batches without blocking. The 50+ technical screeners stay
+            # on largecaps-only via this cap.
+            symbols = symbols[:500]
 
-        if not summary_rows:
-            logger.warning("LiveScreener: no data computed")
-            return pd.DataFrame(), {}
+            # Fetch via Kite admin + jugaad-data
+            per_symbol_dfs, summary_rows = self._fetch_via_kite(symbols)
 
-        summary_df = pd.DataFrame(summary_rows)
-        self._computed_cache = (summary_df, per_symbol_dfs, datetime.now())
-        logger.info(f"LiveScreener: computed indicators for {len(summary_df)} stocks via {self._data_source}")
-        return summary_df, per_symbol_dfs
+            if not summary_rows:
+                logger.warning("LiveScreener: no data computed")
+                return pd.DataFrame(), {}
+
+            summary_df = pd.DataFrame(summary_rows)
+            self._computed_cache = (summary_df, per_symbol_dfs, datetime.now())
+            logger.info(f"LiveScreener: computed indicators for {len(summary_df)} stocks via {self._data_source}")
+            return summary_df, per_symbol_dfs
 
     def _fetch_via_kite(self, symbols: List[str]) -> Tuple[Dict[str, pd.DataFrame], List[Dict]]:
         """Fetch historical OHLCV from Kite Connect + compute indicators."""
@@ -589,10 +608,19 @@ class LiveScreenerEngine:
                 "NIFTY 50": "NIFTY",
                 "Nifty 50": "NIFTY",
                 "NIFTY BANK": "BANKNIFTY",
+                "SENSEX": "SENSEX",
+                "INDIA VIX": "VIX",
                 "^NSEI": "NIFTY",
                 "^NSEBANK": "BANKNIFTY",
+                "^BSESN": "SENSEX",
                 "^INDIAVIX": "VIX"}
-            index_name = index_map.get(td_symbol, index_map.get(yf_symbol, "NIFTY"))
+            # HONEST fallback: an unknown index returns None (renders as "--")
+            # instead of silently defaulting to NIFTY — that default made the
+            # public SENSEX row mirror NIFTY's values.
+            index_name = index_map.get(td_symbol) or index_map.get(yf_symbol)
+            if index_name is None:
+                logger.debug(f"_fetch_index_df: unknown index {td_symbol}/{yf_symbol}")
+                return None
             df = provider.get_historical_index(index_name, period)
             if df is not None and not df.empty:
                 df.columns = [c.lower() for c in df.columns]
